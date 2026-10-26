@@ -2274,31 +2274,53 @@ class App:
             "extra_settings": profile.get("extra_settings") or {},
             "raw": profile.get("_raw") or {},
         }
+        default_dir = str(Path.home() / "Downloads")
         name = filedialog.asksaveasfilename(
             parent=self.root, title="Экспорт профиля", defaultextension=".json",
+            initialdir=default_dir if Path(default_dir).is_dir() else str(Path.home()),
             initialfile=profile["id"] + ".profile.json",
-            filetypes=[("Профиль OpenCode", "*.profile.json"), ("JSON", "*.json")])
+            filetypes=[("JSON файлы", "*.json"), ("Все файлы", "*.*")])
         if not name:
             return
+        path = Path(name)
+        if path.suffix.lower() != ".json":
+            path = path.with_suffix(".json")
         try:
-            Path(name).write_text(json.dumps(data, indent=2, ensure_ascii=False),
-                                  encoding="utf-8")
-        except Exception as exc:
-            messagebox.showerror("Экспорт", str(exc), parent=self.root)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        except PermissionError:
+            messagebox.showerror(
+                "Экспорт",
+                "Нет доступа к папке: %s\n\nВыберите другую папку (например, Загрузки)." % path.parent,
+                parent=self.root)
             return
-        self._set_status("ПРОФИЛЬ %s ЭКСПОРТИРОВАН: %s" % (profile["id"], name))
+        except Exception as exc:
+            messagebox.showerror("Экспорт", "Не удалось сохранить файл:\n%s\n\n%s" % (path, exc),
+                                 parent=self.root)
+            return
+        if not path.exists():
+            messagebox.showerror("Экспорт", "Файл не создан: %s" % path, parent=self.root)
+            return
+        self._set_status("ПРОФИЛЬ %s ЭКСПОРТИРОВАН: %s" % (profile["id"], path))
+        messagebox.showinfo("Экспорт", "Сохранено:\n%s\n\nРазмер: %d байт"
+                            % (path, path.stat().st_size), parent=self.root)
 
     def import_profile(self):
+        default_dir = str(Path.home() / "Downloads")
         name = filedialog.askopenfilename(
             parent=self.root, title="Импорт профиля",
-            filetypes=[("Профиль OpenCode", "*.profile.json"), ("JSON", "*.json"),
-                       ("Все файлы", "*.*")])
+            initialdir=default_dir if Path(default_dir).is_dir() else str(Path.home()),
+            filetypes=[("JSON файлы", "*.json"), ("Все файлы", "*.*")])
         if not name:
             return
+        src = Path(name)
+        if not src.exists():
+            messagebox.showerror("Импорт", "Файл не найден:\n%s" % src, parent=self.root)
+            return
         try:
-            raw = json.loads(Path(name).read_text(encoding="utf-8-sig"))
+            raw = json.loads(src.read_text(encoding="utf-8-sig"))
         except Exception as exc:
-            messagebox.showerror("Импорт", "Не удалось прочитать файл: %s" % exc,
+            messagebox.showerror("Импорт", "Не удалось прочитать файл:\n%s\n\n%s" % (src, exc),
                                  parent=self.root)
             return
         if not isinstance(raw, dict):
