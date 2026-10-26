@@ -1,0 +1,46 @@
+model: deepseek-v4-flash
+fallback_models: []
+temperature: 0.2
+request_timeout_s: 120
+stub_mode: false
+max_steps: 100
+action_delay: 0.7
+max_history_images: 3
+max_tool_result_chars: 6000
+keep_tool_results: 6
+monitor: 0
+screenshot_max_width: 1440
+screenshot_format: jpeg
+screenshot_quality: 70
+save_screenshots: false
+screenshot_dir: screenshots
+# hide_from_screenshots - исключить окно клиента из снимков экрана.
+# Иначе модель видит на снимке собственный чат вместо целевой программы.
+hide_from_screenshots: true
+include_uia_tree: true
+uia_max_nodes: 250
+confirm_mode: always
+allow_destructive: true
+allow_shell: true
+dry_run: false
+language: ru
+enabled_categories:
+- capture
+- input
+- windows
+- system
+log_dir: logs
+stop_hotkey: ctrl+alt+q
+extra:
+  screenshot_max_per_task: 15
+  screenshot_min_interval_s: 1.5
+  agent_screenshot_max_width: 1024
+  crop_to_active_window: true
+  auto_capture: false
+  auto_confirm: true
+  tool_routing: true
+  tool_compact: true
+  provider: cvc
+  base_url: https://api.aikeysforyou.com/v1
+  max_steps_explicit: true
+  console_first: true
