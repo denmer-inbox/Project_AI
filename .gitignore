@@ -47,6 +47,3 @@ _crop_br.png
 _pix.py
 _test_out*
 
-# --- exe собирается в dist/, но хранится в репозитории ---------------------
-dist/*
-!dist/OpenCodeProviderManager.exe

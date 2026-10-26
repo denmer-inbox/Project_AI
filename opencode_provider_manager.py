@@ -13,7 +13,7 @@ OpenCode Provider Manager
 * выбор моделей, которые будут видны в OpenCode;
 * запись изменений с автоматическим снимком предыдущей версии (откат);
 * отдельное окно истории версий и откат в один клик (Ctrl+Z);
-* экспорт и импорт профиля в JSON;
+* экспорт и импорт всех профилей в один JSON-файл;
 * стиль интерфейса — тёмный «космический» HUD (палитра из index.html шутера).
 """
 
@@ -709,6 +709,97 @@ def apply_profiles(config: dict, profiles: list) -> dict:
     if ref and pid not in new["providers"]:
         new.pop("model", None)
     return new
+
+
+# ==========================================================================
+# Файл экспорта / импорта профилей
+# ==========================================================================
+
+EXPORT_TYPE = "opencode-provider-profiles"
+EXPORT_VERSION = 2
+EXPORT_TYPE_SINGLE = "opencode-provider-profile"
+
+
+def profile_to_export(profile: dict) -> dict:
+    """Профиль в виде, пригодном для записи в файл (без служебных полей)."""
+    return {
+        "id": profile["id"],
+        "display_name": profile["display_name"],
+        "coefficient": str(profile.get("coefficient") or ""),
+        "base_url": profile["base_url"],
+        "package": profile["package"],
+        "api_key": profile["api_key"],
+        "models": list(profile["models"]),
+        "known_models": list(profile["known_models"]),
+        "extra_settings": profile.get("extra_settings") or {},
+        "raw": profile.get("_raw") or {},
+    }
+
+
+def build_export_payload(profiles: list, default_model: str = "") -> dict:
+    """Один файл со всеми профилями моделей (а не с одним выбранным)."""
+    payload = {
+        "version": EXPORT_VERSION,
+        "type": EXPORT_TYPE,
+        "profiles": [profile_to_export(p) for p in profiles],
+    }
+    ref = (default_model or "").strip()
+    if ref and ref != "(не задана)":
+        payload["default_model"] = ref
+    return payload
+
+
+def profile_from_export(raw: dict) -> dict:
+    """Превращает запись из файла экспорта во внутренний профиль."""
+    if not isinstance(raw, dict):
+        raise ValueError("запись профиля не является объектом JSON")
+    pid = str(raw.get("id") or "").strip()
+    if not re.match(r"^[A-Za-z0-9._-]+$", pid or ""):
+        raise ValueError("отсутствует корректный ID профиля")
+    models = [str(m) for m in (raw.get("models") or []) if str(m).strip()]
+    known = [str(m) for m in (raw.get("known_models") or models) if str(m).strip()]
+    return {
+        "id": pid,
+        "display_name": raw.get("display_name") or pid,
+        "coefficient": str(raw.get("coefficient") or ""),
+        "base_url": raw.get("base_url") or "",
+        "api_key": raw.get("api_key") or "",
+        "package": raw.get("package") or PACKAGES[0],
+        "models": models,
+        "known_models": known,
+        "extra_settings": raw.get("extra_settings") or {},
+        "_raw": raw.get("raw") or None,
+    }
+
+
+def profiles_from_export(data) -> tuple:
+    """Разбирает файл экспорта. Понимает и новый формат (все профили),
+    и старый (один профиль), и просто список профилей.
+
+    Возвращает (profiles, default_model).
+    """
+    if isinstance(data, list):
+        entries, default_model = data, ""
+    elif isinstance(data, dict):
+        default_model = str(data.get("default_model") or "").strip()
+        if isinstance(data.get("profiles"), list):
+            entries = data["profiles"]
+        elif data.get("id"):
+            # старый формат: один профиль в корне файла
+            entries = [data]
+        else:
+            raise ValueError("В файле нет профилей (ожидается ключ \"profiles\")")
+    else:
+        raise ValueError("Файл не содержит объект JSON")
+    result = []
+    for idx, entry in enumerate(entries, 1):
+        try:
+            result.append(profile_from_export(entry))
+        except ValueError as exc:
+            raise ValueError("Профиль №%d: %s" % (idx, exc))
+    if not result:
+        raise ValueError("В файле нет ни одного профиля")
+    return result, default_model
 
 
 # ==========================================================================
@@ -1813,9 +1904,9 @@ class App:
                    command=self.open_history).pack(side="left", padx=3)
         ttk.Button(row2, text="СНИМОК СЕЙЧАС",
                    command=lambda: self.snapshot_now("Ручной снимок")).pack(side="left", padx=3)
-        ttk.Button(row2, text="ЭКСПОРТ ПРОФИЛЯ…",
+        ttk.Button(row2, text="ЭКСПОРТ ВСЕХ ПРОФИЛЕЙ…",
                    command=self.export_profile).pack(side="left", padx=3)
-        ttk.Button(row2, text="ИМПОРТ ПРОФИЛЯ…",
+        ttk.Button(row2, text="ИМПОРТ ПРОФИЛЕЙ…",
                    command=self.import_profile).pack(side="left", padx=3)
         self.hist_info = tk.Label(row2, text="Снимков: 0", bg=T.bg, fg=T.cyan_soft,
                                   font=T.mono_small, anchor="e")
@@ -2257,28 +2348,16 @@ class App:
 
     # --- экспорт / импорт -------------------------------------------------
     def export_profile(self):
-        profile = self._find(self.selected) if self.selected else None
-        if not profile:
-            messagebox.showinfo("Экспорт", "Выберите профиль в списке", parent=self.root)
+        if not self.profiles:
+            messagebox.showinfo("Экспорт профилей", "Список профилей пуст — нечего сохранять",
+                                parent=self.root)
             return
-        data = {
-            "version": 1,
-            "type": "opencode-provider-profile",
-            "id": profile["id"],
-            "display_name": profile["display_name"],
-            "base_url": profile["base_url"],
-            "package": profile["package"],
-            "api_key": profile["api_key"],
-            "models": list(profile["models"]),
-            "known_models": list(profile["known_models"]),
-            "extra_settings": profile.get("extra_settings") or {},
-            "raw": profile.get("_raw") or {},
-        }
+        data = build_export_payload(self.profiles, self.var_default_model.get())
         default_dir = str(Path.home() / "Downloads")
         name = filedialog.asksaveasfilename(
-            parent=self.root, title="Экспорт профиля", defaultextension=".json",
+            parent=self.root, title="Экспорт всех профилей моделей", defaultextension=".json",
             initialdir=default_dir if Path(default_dir).is_dir() else str(Path.home()),
-            initialfile=profile["id"] + ".profile.json",
+            initialfile="opencode-profiles.json",
             filetypes=[("JSON файлы", "*.json"), ("Все файлы", "*.*")])
         if not name:
             return
@@ -2301,14 +2380,16 @@ class App:
         if not path.exists():
             messagebox.showerror("Экспорт", "Файл не создан: %s" % path, parent=self.root)
             return
-        self._set_status("ПРОФИЛЬ %s ЭКСПОРТИРОВАН: %s" % (profile["id"], path))
-        messagebox.showinfo("Экспорт", "Сохранено:\n%s\n\nРазмер: %d байт"
-                            % (path, path.stat().st_size), parent=self.root)
+        self._set_status("ЭКСПОРТИРОВАНО ПРОФИЛЕЙ: %d → %s" % (len(data["profiles"]), path))
+        messagebox.showinfo(
+            "Экспорт",
+            "Сохранено профилей: %d\n\nФайл:\n%s\n\nРазмер: %d байт" % (
+                len(data["profiles"]), path, path.stat().st_size), parent=self.root)
 
     def import_profile(self):
         default_dir = str(Path.home() / "Downloads")
         name = filedialog.askopenfilename(
-            parent=self.root, title="Импорт профиля",
+            parent=self.root, title="Импорт профилей",
             initialdir=default_dir if Path(default_dir).is_dir() else str(Path.home()),
             filetypes=[("JSON файлы", "*.json"), ("Все файлы", "*.*")])
         if not name:
@@ -2323,36 +2404,38 @@ class App:
             messagebox.showerror("Импорт", "Не удалось прочитать файл:\n%s\n\n%s" % (src, exc),
                                  parent=self.root)
             return
-        if not isinstance(raw, dict):
-            messagebox.showerror("Импорт", "Файл не содержит объект JSON", parent=self.root)
+        try:
+            imported, default_model = profiles_from_export(raw)
+        except ValueError as exc:
+            messagebox.showerror("Импорт", "%s\n\nФайл: %s" % (exc, src), parent=self.root)
             return
-        pid = str(raw.get("id") or "").strip()
-        if not re.match(r"^[A-Za-z0-9._-]+$", pid or ""):
-            messagebox.showerror("Импорт", "В файле отсутствует корректный ID профиля",
-                                 parent=self.root)
-            return
-        existing = self._find(pid)
-        if existing is not None and not messagebox.askyesno(
-                "Импорт", "Профиль «%s» уже есть. Заменить его?" % pid, parent=self.root):
-            return
-        profile = {
-            "id": pid,
-            "display_name": raw.get("display_name") or pid,
-            "base_url": raw.get("base_url") or "",
-            "api_key": raw.get("api_key") or "",
-            "package": raw.get("package") or PACKAGES[0],
-            "models": list(raw.get("models") or []),
-            "known_models": list(raw.get("known_models") or raw.get("models") or []),
-            "extra_settings": raw.get("extra_settings") or {},
-            "_raw": raw.get("raw") or None,
-        }
-        if existing is not None:
-            self.profiles[self.profiles.index(existing)] = profile
-        else:
-            self.profiles.append(profile)
-        self.selected = pid
+        existing = [p["id"] for p in imported if self._find(p["id"]) is not None]
+        if existing:
+            if not messagebox.askyesno(
+                    "Импорт",
+                    "Уже есть профили с такими ID:\n%s\n\nЗаменить их?" % ", ".join(existing),
+                    parent=self.root):
+                return
+        added = replaced = 0
+        for profile in imported:
+            current = self._find(profile["id"])
+            if current is not None:
+                self.profiles[self.profiles.index(current)] = profile
+                replaced += 1
+            else:
+                self.profiles.append(profile)
+                added += 1
+        if default_model:
+            self.var_default_model.set(default_model)
+        self.selected = imported[0]["id"]
         self._render_list()
-        self._set_status("ИМПОРТИРОВАН ПРОФИЛЬ %s (НЕ СОХРАНЁН)" % pid)
+        self._set_status("ИМПОРТИРОВАНО ПРОФИЛЕЙ: %d (новых %d, заменено %d) — НЕ СОХРАНЁН"
+                         % (len(imported), added, replaced))
+        messagebox.showinfo(
+            "Импорт",
+            "Импортировано профилей: %d\nНовых: %d\nЗаменено: %d\n\n"
+            "Не забудьте «ПРИМЕНИТЬ К КОНФИГУ»." % (len(imported), added, replaced),
+            parent=self.root)
 
     def run(self):
         self.root.mainloop()

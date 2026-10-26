@@ -238,7 +238,7 @@ def _n(_Lah: Path, _Lai: int=HISTORY_LIMIT) -> None:
         _Lap.append((_Lao, '*.bak'))
     _Lap.append((_Lah.parent, _Lah.name + '.bak-*'))
     for _Laj, _Lak in _Lap:
-        _Lal = sorted((_Lan for _Lan in _Laj.glob(_Lak) if _Lan.is_file()), key=lambda p: _Lan.stat().st_mtime, reverse=True)
+        _Lal = sorted((_Lan for _Lan in _Laj.glob(_Lak) if _Lan.is_file()), key=lambda p: p.stat().st_mtime, reverse=True)
         for _Lam in _Lal[_Lai:]:
             try:
                 _Lam.unlink()
@@ -557,6 +557,52 @@ def _4(_Ldc: dict, _Ldd: list) -> dict:
     if _Ldf and _Lde not in _Ldh['providers']:
         _Ldh.pop('model', None)
     return _Ldh
+
+_EXPORT_TYPE = 'opencode-provider-profiles'
+_EXPORT_VERSION = 2
+
+def _profile_to_export(_Lp: dict) -> dict:
+    return {'id': _Lp['id'], 'display_name': _Lp['display_name'], 'coefficient': str(_Lp.get('coefficient') or ''), 'base_url': _Lp['base_url'], 'package': _Lp['package'], 'api_key': _Lp['api_key'], 'models': list(_Lp['models']), 'known_models': list(_Lp['known_models']), 'extra_settings': _Lp.get('extra_settings') or {}, 'raw': _Lp.get('_raw') or {}}
+
+def _build_export_payload(_Lq: list, _Lr: str='') -> dict:
+    _Ls = {'version': _EXPORT_VERSION, 'type': _EXPORT_TYPE, 'profiles': [_profile_to_export(_Lt) for _Lt in _Lq]}
+    _Lu = (_Lr or '').strip()
+    if _Lu and _Lu != '(не задана)':
+        _Ls['default_model'] = _Lu
+    return _Ls
+
+def _profile_from_export(_Lv: dict) -> dict:
+    if not isinstance(_Lv, dict):
+        raise ValueError('запись профиля не является объектом JSON')
+    _Lw = str(_Lv.get('id') or '').strip()
+    if not re.match('^[A-Za-z0-9._-]+$', _Lw or ''):
+        raise ValueError('отсутствует корректный ID профиля')
+    _Lx = [str(_Ly) for _Ly in (_Lv.get('models') or []) if str(_Ly).strip()]
+    _Lz = [str(_La) for _La in (_Lv.get('known_models') or _Lx) if str(_La).strip()]
+    return {'id': _Lw, 'display_name': _Lv.get('display_name') or _Lw, 'coefficient': str(_Lv.get('coefficient') or ''), 'base_url': _Lv.get('base_url') or '', 'api_key': _Lv.get('api_key') or '', 'package': _Lv.get('package') or PACKAGES[0], 'models': _Lx, 'known_models': _Lz, 'extra_settings': _Lv.get('extra_settings') or {}, '_raw': _Lv.get('raw') or None}
+
+def _profiles_from_export(data) -> tuple:
+    if isinstance(data, list):
+        _Lb, _Lc = (data, '')
+    elif isinstance(data, dict):
+        _Lc = str(data.get('default_model') or '').strip()
+        if isinstance(data.get('profiles'), list):
+            _Lb = data['profiles']
+        elif data.get('id'):
+            _Lb = [data]
+        else:
+            raise ValueError('В файле нет профилей (ожидается ключ "profiles")')
+    else:
+        raise ValueError('Файл не содержит объект JSON')
+    _Ld = []
+    for _Le, _Lf in enumerate(_Lb, 1):
+        try:
+            _Ld.append(_profile_from_export(_Lf))
+        except ValueError as _Lg:
+            raise ValueError('Профиль №%d: %s' % (_Le, _Lg))
+    if not _Ld:
+        raise ValueError('В файле нет ни одного профиля')
+    return (_Ld, _Lc)
 
 class _5(tk.Toplevel):
 
@@ -1446,8 +1492,8 @@ class App:
         _Lev.pack(fill='x', pady=(6, 0))
         ttk.Button(_Lev, text='ИСТОРИЯ И ОТКАТ…', command=self.open_history).pack(side='left', padx=3)
         ttk.Button(_Lev, text='СНИМОК СЕЙЧАС', command=lambda: self.snapshot_now('Ручной снимок')).pack(side='left', padx=3)
-        ttk.Button(_Lev, text='ЭКСПОРТ ПРОФИЛЯ…', command=self.export_profile).pack(side='left', padx=3)
-        ttk.Button(_Lev, text='ИМПОРТ ПРОФИЛЯ…', command=self.import_profile).pack(side='left', padx=3)
+        ttk.Button(_Lev, text='ЭКСПОРТ ВСЕХ ПРОФИЛЕЙ…', command=self.export_profile).pack(side='left', padx=3)
+        ttk.Button(_Lev, text='ИМПОРТ ПРОФИЛЕЙ…', command=self.import_profile).pack(side='left', padx=3)
         self.hist_info = tk.Label(_Lev, text='Снимков: 0', bg=_b._T1, fg=_b._T7, font=_b._T15, anchor='e')
         self.hist_info.pack(side='right', padx=(6, 10))
         tk.Frame(_Lev, bg=_b._T1).pack(side='left', fill='x', expand=True)
@@ -1826,13 +1872,12 @@ class App:
             self._set_status('СОХРАНЕНА КОНТРОЛЬНАЯ ТОЧКА: ' + (_Lg3.name if _Lg3 else '—'))
 
     def export_profile(self):
-        _Lhb = self._find(self.selected) if self.selected else None
-        if not _Lhb:
-            messagebox.showinfo('Экспорт', 'Выберите профиль в списке', parent=self.root)
+        if not self.profiles:
+            messagebox.showinfo('Экспорт профилей', 'Список профилей пуст — нечего сохранять', parent=self.root)
             return
-        _Lha = {'version': 1, 'type': 'opencode-provider-profile', 'id': _Lhb['id'], 'display_name': _Lhb['display_name'], 'base_url': _Lhb['base_url'], 'package': _Lhb['package'], 'api_key': _Lhb['api_key'], 'models': list(_Lhb['models']), 'known_models': list(_Lhb['known_models']), 'extra_settings': _Lhb.get('extra_settings') or {}, 'raw': _Lhb.get('_raw') or {}}
+        _Lha = _build_export_payload(self.profiles, self.var_default_model.get())
         _Lg9 = str(Path.home() / 'Downloads')
-        _Lg8 = filedialog.asksaveasfilename(parent=self.root, title='Экспорт профиля', defaultextension='.json', initialdir=_Lg9 if Path(_Lg9).is_dir() else str(Path.home()), initialfile=_Lhb['id'] + '.profile.json', filetypes=[('JSON файлы', '*.json'), ('Все файлы', '*.*')])
+        _Lg8 = filedialog.asksaveasfilename(parent=self.root, title='Экспорт всех профилей моделей', defaultextension='.json', initialdir=_Lg9 if Path(_Lg9).is_dir() else str(Path.home()), initialfile='opencode-profiles.json', filetypes=[('JSON файлы', '*.json'), ('Все файлы', '*.*')])
         if not _Lg8:
             return
         _Lg7 = Path(_Lg8)
@@ -1850,12 +1895,12 @@ class App:
         if not _Lg7.exists():
             messagebox.showerror('Экспорт', 'Файл не создан: %s' % _Lg7, parent=self.root)
             return
-        self._set_status('ПРОФИЛЬ %s ЭКСПОРТИРОВАН: %s' % (_Lhb['id'], _Lg7))
-        messagebox.showinfo('Экспорт', 'Сохранено:\n%s\n\nРазмер: %d байт' % (_Lg7, _Lg7.stat().st_size), parent=self.root)
+        self._set_status('ЭКСПОРТИРОВАНО ПРОФИЛЕЙ: %d → %s' % (len(_Lha['profiles']), _Lg7))
+        messagebox.showinfo('Экспорт', 'Сохранено профилей: %d\n\nФайл:\n%s\n\nРазмер: %d байт' % (len(_Lha['profiles']), _Lg7, _Lg7.stat().st_size), parent=self.root)
 
     def import_profile(self):
         _Lhj = str(Path.home() / 'Downloads')
-        _Lhi = filedialog.askopenfilename(parent=self.root, title='Импорт профиля', initialdir=_Lhj if Path(_Lhj).is_dir() else str(Path.home()), filetypes=[('JSON файлы', '*.json'), ('Все файлы', '*.*')])
+        _Lhi = filedialog.askopenfilename(parent=self.root, title='Импорт профилей', initialdir=_Lhj if Path(_Lhj).is_dir() else str(Path.home()), filetypes=[('JSON файлы', '*.json'), ('Все файлы', '*.*')])
         if not _Lhi:
             return
         _Lhh = Path(_Lhi)
@@ -1867,24 +1912,29 @@ class App:
         except Exception as _Lhg:
             messagebox.showerror('Импорт', 'Не удалось прочитать файл:\n%s\n\n%s' % (_Lhh, _Lhg), parent=self.root)
             return
-        if not isinstance(_Lhf, dict):
-            messagebox.showerror('Импорт', 'Файл не содержит объект JSON', parent=self.root)
+        try:
+            _Lhm, _Lhn = _profiles_from_export(_Lhf)
+        except ValueError as _Lho:
+            messagebox.showerror('Импорт', '%s\n\nФайл: %s' % (_Lho, _Lhh), parent=self.root)
             return
-        _Lhe = str(_Lhf.get('id') or '').strip()
-        if not re.match('^[A-Za-z0-9._-]+$', _Lhe or ''):
-            messagebox.showerror('Импорт', 'В файле отсутствует корректный ID профиля', parent=self.root)
+        _Lhp = [_Lhq['id'] for _Lhq in _Lhm if self._find(_Lhq['id']) is not None]
+        if _Lhp and (not messagebox.askyesno('Импорт', 'Уже есть профили с такими ID:\n%s\n\nЗаменить их?' % ', '.join(_Lhp), parent=self.root)):
             return
-        _Lhd = self._find(_Lhe)
-        if _Lhd is not None and (not messagebox.askyesno('Импорт', 'Профиль «%s» уже есть. Заменить его?' % _Lhe, parent=self.root)):
-            return
-        _Lhc = {'id': _Lhe, 'display_name': _Lhf.get('display_name') or _Lhe, 'base_url': _Lhf.get('base_url') or '', 'api_key': _Lhf.get('api_key') or '', 'package': _Lhf.get('package') or PACKAGES[0], 'models': list(_Lhf.get('models') or []), 'known_models': list(_Lhf.get('known_models') or _Lhf.get('models') or []), 'extra_settings': _Lhf.get('extra_settings') or {}, '_raw': _Lhf.get('raw') or None}
-        if _Lhd is not None:
-            self.profiles[self.profiles.index(_Lhd)] = _Lhc
-        else:
-            self.profiles.append(_Lhc)
-        self.selected = _Lhe
+        _Lhr = _Lhs = 0
+        for _Lht in _Lhm:
+            _Lhu = self._find(_Lht['id'])
+            if _Lhu is not None:
+                self.profiles[self.profiles.index(_Lhu)] = _Lht
+                _Lhs += 1
+            else:
+                self.profiles.append(_Lht)
+                _Lhr += 1
+        if _Lhn:
+            self.var_default_model.set(_Lhn)
+        self.selected = _Lhm[0]['id']
         self._render_list()
-        self._set_status('ИМПОРТИРОВАН ПРОФИЛЬ %s (НЕ СОХРАНЁН)' % _Lhe)
+        self._set_status('ИМПОРТИРОВАНО ПРОФИЛЕЙ: %d (новых %d, заменено %d) — НЕ СОХРАНЁН' % (len(_Lhm), _Lhr, _Lhs))
+        messagebox.showinfo('Импорт', 'Импортировано профилей: %d\nНовых: %d\nЗаменено: %d\n\nНе забудьте «ПРИМЕНИТЬ К КОНФИГУ».' % (len(_Lhm), _Lhr, _Lhs), parent=self.root)
 
     def run(self):
         self.root.mainloop()
