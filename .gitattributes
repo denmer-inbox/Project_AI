@@ -1,0 +1,3 @@
+# The packaged application in dist/ is a build artifact: keep every file
+# byte-for-byte as built (no line-ending conversion inside the bundle).
+dist/OpenCodeProviderManager/** -text

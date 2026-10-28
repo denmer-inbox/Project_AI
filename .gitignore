@@ -47,3 +47,8 @@ _crop_br.png
 _pix.py
 _test_out*
 
+# --- сборка в dist/ хранится в репозитории ---------------------------------
+dist/*
+!dist/OpenCodeProviderManager/
+# внутри сборки нужны и *.pyd/*.pyc: без них приложение не запустится
+!dist/OpenCodeProviderManager/**
