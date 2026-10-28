@@ -623,14 +623,14 @@ class _5(tk.Toplevel):
         self.configure(bg=_b._T1)
         self.transient(app.root)
         self.grab_set()
-        self.var_id = tk.StringVar(value=(profile or {}).get('id', ''))
-        self.var_name = tk.StringVar(value=(profile or {}).get('display_name', ''))
-        self.var_url = tk.StringVar(value=(profile or {}).get('base_url', ''))
-        self.var_key = tk.StringVar(value=(profile or {}).get('api_key', ''))
-        self.var_pkg = tk.StringVar(value=(profile or {}).get('package', PACKAGES[0]))
-        self.var_set_default = tk.BooleanVar(value=False)
-        self.var_coef = tk.StringVar(value=str((profile or {}).get('coefficient', '') or ''))
-        self.var_filter = tk.StringVar()
+        self.var_id = tk.StringVar(master=self, value=(profile or {}).get('id', ''))
+        self.var_name = tk.StringVar(master=self, value=(profile or {}).get('display_name', ''))
+        self.var_url = tk.StringVar(master=self, value=(profile or {}).get('base_url', ''))
+        self.var_key = tk.StringVar(master=self, value=(profile or {}).get('api_key', ''))
+        self.var_pkg = tk.StringVar(master=self, value=(profile or {}).get('package', PACKAGES[0]))
+        self.var_set_default = tk.BooleanVar(master=self, value=False)
+        self.var_coef = tk.StringVar(master=self, value=str((profile or {}).get('coefficient', '') or ''))
+        self.var_filter = tk.StringVar(master=self)
         self.var_filter.trace_add('write', lambda *a: self._render_models())
         self._balance_value = (profile or {}).get('_balance') or None
         self.var_coef.trace_add('write', lambda *a: self._update_estimate())
@@ -645,11 +645,21 @@ class _5(tk.Toplevel):
             app.clipboard.bind_tree(self)
         except Exception:
             pass
+        try:
+            self.after(60, self._focus_first_field)
+        except Exception:
+            pass
         self.bind('<Escape>', lambda e: self._cancel())
         if not self.is_new and self.known_models:
             for mid in self.known_models:
                 self.models.append({'id': mid, 'display': mid})
             self._render_models()
+
+    def _focus_first_field(self):
+        try:
+            self.e_id.focus_set()
+        except Exception:
+            pass
 
     def _field(self, parent, row, label, var, show=None):
         tk.Label(parent, text=label, bg=_b._T1, fg=_b._T7, font=_b._T15, width=15, anchor='w').grid(row=row, column=0, sticky='w', padx=(4, 8), pady=4)
@@ -1091,6 +1101,49 @@ class _8(tk.Checkbutton):
             return 'break'
         return None
 
+_VK_INSERT = 45
+_VK_A = 65
+_VK_C = 67
+_VK_V = 86
+_VK_X = 88
+_CTRL = 0x0004
+_SHORTCUT_EVENTS = {'paste': '<<Paste>>', 'copy': '<<Copy>>', 'cut': '<<Cut>>', 'select_all': '<<SelectAll>>'}
+_CONTROL_KEYS = {'paste': (_VK_V,), 'copy': (_VK_C, _VK_INSERT), 'cut': (_VK_X,), 'select_all': (_VK_A,)}
+_LATIN_KEYS = {'paste': ('v', 'V'), 'copy': ('c', 'C'), 'cut': ('x', 'X'), 'select_all': ('a', 'A')}
+_INPUT_CLASSES = ('TEntry', 'TCombobox', 'TSpinbox', 'Entry', 'Spinbox', 'Text')
+
+def _input_widget(_M0):
+    try:
+        return _M0.winfo_class() in _INPUT_CLASSES
+    except Exception:
+        return False
+
+def _int_attr(_M1, _M2):
+    try:
+        return int(getattr(_M1, _M2, 0) or 0)
+    except Exception:
+        return 0
+
+def _state_of(_M3):
+    return _int_attr(_M3, 'state')
+
+def _keycode_of(_M4):
+    return _int_attr(_M4, 'keycode')
+
+def _keysym_of(_M5):
+    return str(getattr(_M5, 'keysym', '') or '')
+
+def _shortcut_action(_M6):
+    if _M6 is None:
+        return None
+    if not _state_of(_M6) & _CTRL:
+        return None
+    _M7 = _keycode_of(_M6)
+    for _M8, _M9 in _CONTROL_KEYS.items():
+        if _M7 in _M9:
+            return _M8
+    return None
+
 class _9:
 
     def __init__(self, _Ldz):
@@ -1102,20 +1155,11 @@ class _9:
         self.menu.add_separator()
         self.menu.add_command(label='ВЫДЕЛИТЬ ВСЁ    Ctrl+A', command=self._select_all)
         self._target = None
-        self._last_clip = ''
-        self._watch_widget = None
-        self._watch_after = None
-        self._watch_armed = False
         self.menu.bind('<FocusOut>', lambda e: self.menu.unpost())
 
     def _widget(self, _Ld0):
         _Ld1 = _Ld0.widget
-        try:
-            if _Ld1.winfo_class() in ('TEntry', 'Entry', 'Text'):
-                return _Ld1
-        except Exception:
-            pass
-        return None
+        return _Ld1 if _input_widget(_Ld1) else None
 
     def bind(self, _Ld2):
         _Ld2.bind('<Button-3>', self.popup, add='+')
@@ -1123,8 +1167,38 @@ class _9:
 
     def bind_tree(self, _Ld3):
         self.bind(_Ld3)
+        if _input_widget(_Ld3):
+            _Ld3.bind('<Control-KeyPress>', self.on_control_key, add='+')
         for _Ld4 in _Ld3.winfo_children():
             self.bind_tree(_Ld4)
+
+    def _target_for(self, _Ma=None):
+        _Mb = getattr(_Ma, 'widget', None) if _Ma is not None else None
+        if _input_widget(_Mb):
+            return _Mb
+        try:
+            _Mb = self.root.focus_get()
+        except Exception:
+            _Mb = None
+        return _Mb if _input_widget(_Mb) else None
+
+    def _run_shortcut(self, _Mc, _Md):
+        _Me = _SHORTCUT_EVENTS[_Md]
+        if _Mc is None:
+            return None
+        try:
+            _Mc.event_generate(_Me)
+        except Exception:
+            return None
+        return 'break'
+
+    def on_control_key(self, _Mf):
+        _Mg = _shortcut_action(_Mf)
+        if _Mg is None:
+            return None
+        if _keysym_of(_Mf) in _LATIN_KEYS[_Mg]:
+            return None
+        return self._run_shortcut(self._target_for(_Mf), _Mg)
 
     def _cls(self, _Ld5):
         try:
@@ -1189,49 +1263,6 @@ class _9:
         except Exception:
             return ''
 
-    def watch_begin(self, _Lec):
-        self._watch_widget = _Lec
-        self._last_clip = self._read_clip()
-        self._watch_armed = True
-        if self._watch_after is not None:
-            try:
-                self.root.after_cancel(self._watch_after)
-            except Exception:
-                pass
-        self._watch_after = self.root.after(150, self._watch_tick)
-
-    def _watch_tick(self):
-        self._watch_after = None
-        if not self._watch_armed:
-            return
-        _Lef = self._watch_widget
-        try:
-            _Lee = _Lef is not None and _Lef.winfo_exists()
-        except Exception:
-            _Lee = False
-        if not _Lee:
-            self._watch_armed = False
-            return
-        _Led = self._read_clip()
-        if _Led and _Led != self._last_clip:
-            self._watch_armed = False
-            self._watch_widget = None
-            self._target = _Lef
-            try:
-                _Lef.icursor('end')
-            except Exception:
-                try:
-                    _Lef.mark_set('insert', 'end')
-                except Exception:
-                    pass
-            self._insert_text(_Lef, _Led)
-            try:
-                _Lef.focus_force()
-            except Exception:
-                pass
-            return
-        self._watch_after = self.root.after(200, self._watch_tick)
-
     def _insert_text(self, _Leg, _Leh):
         try:
             if str(_Leg.cget('state')) == 'readonly':
@@ -1252,105 +1283,19 @@ class _9:
         if _Lej is None:
             return 'break'
         self._target = _Lej
-        self._last_clip = self._read_clip()
         try:
             self.menu.tk_popup(_Lei.x_root, _Lei.y_root)
         finally:
             self.menu.grab_release()
         return 'break'
 
-def _aa(menu, root, interval=700):
-    state = {'last': menu._read_clip(), 'skip': 0}
-
-    def tick():
-        try:
-            _Len = menu._read_clip()
-        except Exception:
-            _Len = ''
-        if _Len and _Len != state['last']:
-            state['last'] = _Len
-            _Lek = None
-            try:
-                _Lek = root.focus_get()
-            except Exception:
-                _Lek = None
-            try:
-                _Lel = _Lek is not None and _Lek.winfo_class() in ('TEntry', 'Entry', 'Text')
-            except Exception:
-                _Lel = False
-            if _Lel and (not menu._watch_armed):
-                _Lem = ''
-                try:
-                    _Lem = _Lek.get()
-                except Exception:
-                    pass
-                if _Len not in (_Lem or ''):
-                    menu._insert_text(_Lek, _Len)
-                    state['skip'] = 2
-        try:
-            root.after(interval, tick)
-        except Exception:
-            pass
-    root.after(interval, tick)
-
 def _ab(root):
     menu = _9(root)
-
-    def cur():
+    for _Mh in _INPUT_CLASSES:
         try:
-            return root.focus_get()
-        except Exception:
-            return None
-
-    def do(action):
-
-        def handler(_Lhm=None):
-            menu._target = cur()
-            action()
-            return 'break'
-        return handler
-
-    def bind_to(_Leo):
-        try:
-            if _Leo.winfo_class() in ('TEntry', 'Entry', 'Text'):
-                for _Leq, _Ler in (('<Control-c>', do(menu._copy)), ('<Control-v>', do(menu._paste)), ('<Control-x>', do(menu._cut)), ('<Control-a>', do(menu._select_all))):
-                    _Leo.bind(_Leq, _Ler, add='+')
+            root.bind_class(_Mh, '<Control-KeyPress>', menu.on_control_key, add='+')
         except Exception:
             pass
-        for _Lep in _Leo.winfo_children():
-            bind_to(_Lep)
-    bind_to(root)
-    for klass, seq, fn in (('TEntry', '<Control-c>', do(menu._copy)), ('TEntry', '<Control-v>', do(menu._paste)), ('TEntry', '<Control-x>', do(menu._cut)), ('TEntry', '<Control-a>', do(menu._select_all)), ('Text', '<Control-c>', do(menu._copy)), ('Text', '<Control-v>', do(menu._paste)), ('Text', '<Control-x>', do(menu._cut)), ('Text', '<Control-a>', do(menu._select_all))):
-        try:
-            root.bind_class(klass, seq, fn, add='+')
-        except Exception:
-            pass
-    for seq, fn in (('<Control-c>', do(menu._copy)), ('<Control-v>', do(menu._paste)), ('<Control-x>', do(menu._cut)), ('<Control-a>', do(menu._select_all)), ('<Control-Insert>', do(menu._copy)), ('<Shift-Insert>', do(menu._paste))):
-        try:
-            root.bind_all(seq, fn, add='+')
-        except Exception:
-            pass
-
-    def do_winv(_Les=None):
-        _Let = cur()
-        if _Let is not None:
-            menu.watch_begin(_Let)
-        return None
-    for seq in ('<Control-KeyPress-v>', '<Shift-KeyPress-Insert>', '<Control-Insert>'):
-
-        def arm(_Lhn, _Lho=seq):
-            _Lhp = menu._widget(_Lhn)
-            if _Lhp is not None:
-                menu.watch_begin(_Lhp)
-            return None
-        try:
-            root.bind_all(seq, arm, add='+')
-        except Exception:
-            pass
-    try:
-        _aa(menu, root)
-    except Exception:
-        pass
     return menu
 
 class App:

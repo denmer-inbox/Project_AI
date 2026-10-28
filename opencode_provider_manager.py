@@ -828,14 +828,17 @@ class ProfileDialog(tk.Toplevel):
         self.transient(app.root)
         self.grab_set()
 
-        self.var_id = tk.StringVar(value=(profile or {}).get("id", ""))
-        self.var_name = tk.StringVar(value=(profile or {}).get("display_name", ""))
-        self.var_url = tk.StringVar(value=(profile or {}).get("base_url", ""))
-        self.var_key = tk.StringVar(value=(profile or {}).get("api_key", ""))
-        self.var_pkg = tk.StringVar(value=(profile or {}).get("package", PACKAGES[0]))
-        self.var_set_default = tk.BooleanVar(value=False)
-        self.var_coef = tk.StringVar(value=str((profile or {}).get("coefficient", "") or ""))
-        self.var_filter = tk.StringVar()
+        # master=self: переменные должны принадлежать этому же Tk-интерпретатору,
+        # иначе (если в процессе есть другой корень) поле теряет связь с переменной
+        self.var_id = tk.StringVar(master=self, value=(profile or {}).get("id", ""))
+        self.var_name = tk.StringVar(master=self, value=(profile or {}).get("display_name", ""))
+        self.var_url = tk.StringVar(master=self, value=(profile or {}).get("base_url", ""))
+        self.var_key = tk.StringVar(master=self, value=(profile or {}).get("api_key", ""))
+        self.var_pkg = tk.StringVar(master=self, value=(profile or {}).get("package", PACKAGES[0]))
+        self.var_set_default = tk.BooleanVar(master=self, value=False)
+        self.var_coef = tk.StringVar(master=self,
+                                     value=str((profile or {}).get("coefficient", "") or ""))
+        self.var_filter = tk.StringVar(master=self)
         self.var_filter.trace_add("write", lambda *a: self._render_models())
 
         self._balance_value = (profile or {}).get("_balance") or None
@@ -852,6 +855,11 @@ class ProfileDialog(tk.Toplevel):
             app.clipboard.bind_tree(self)
         except Exception:
             pass
+        # сразу ставим фокус в первое поле: вставка работает без лишнего клика
+        try:
+            self.after(60, self._focus_first_field)
+        except Exception:
+            pass
         self.bind("<Escape>", lambda e: self._cancel())
         if not self.is_new and self.known_models:
             for mid in self.known_models:
@@ -859,6 +867,13 @@ class ProfileDialog(tk.Toplevel):
             self._render_models()
 
     # --- UI -------------------------------------------------------------
+    def _focus_first_field(self):
+        """Фокус в первое поле ввода (вызывается после отрисовки диалога)."""
+        try:
+            self.e_id.focus_set()
+        except Exception:
+            pass
+
     def _field(self, parent, row, label, var, show=None):
         tk.Label(parent, text=label, bg=T.bg, fg=T.cyan_soft, font=T.mono_small,
                  width=15, anchor="w").grid(row=row, column=0, sticky="w", padx=(4, 8), pady=4)
@@ -1400,6 +1415,92 @@ class SmartCheck(tk.Checkbutton):
 # Буфер обмена: контекстное меню и горячие клавиши для полей ввода
 # ==========================================================================
 
+# Виртуальные коды Windows одинаковы при любой раскладке: Tk кладёт их в
+# event.keycode. При русской раскладке Ctrl+V приходит с keysym «м»
+# (Cyrillic_em), а не «v», поэтому привязки вида <Control-v> и штатная
+# карта <<Paste>> молчат — вставка не работает. Распознаём сочетания по коду
+# клавиши и выполняем действие штатным виртуальным событием Tk.
+VK_INSERT = 45
+VK_A = 65
+VK_C = 67
+VK_V = 86
+VK_X = 88
+
+#: Маска состояния Ctrl в событии Tk.
+CONTROL_STATE = 0x0004
+
+#: Действие -> виртуальное событие Tk, которое выполняет его штатно.
+SHORTCUT_EVENTS = {
+    "paste": "<<Paste>>",
+    "copy": "<<Copy>>",
+    "cut": "<<Cut>>",
+    "select_all": "<<SelectAll>>",
+}
+
+#: Действие -> коды клавиш, которые запускают его с зажатым Ctrl.
+CONTROL_KEYCODES = {
+    "paste": (VK_V,),
+    "copy": (VK_C, VK_INSERT),
+    "cut": (VK_X,),
+    "select_all": (VK_A,),
+}
+
+#: Латинские символы этих же клавиш: с ними Tk справляется сам.
+LATIN_SHORTCUT_KEYSYMS = {
+    "paste": ("v", "V"),
+    "copy": ("c", "C"),
+    "cut": ("x", "X"),
+    "select_all": ("a", "A"),
+}
+
+#: Классы виджетов, в которых работают вставка и команды редактирования.
+INPUT_CLASSES = ("TEntry", "TCombobox", "TSpinbox", "Entry", "Spinbox", "Text")
+
+
+def is_input_widget(widget):
+    """Поле ввода, в котором имеет смысл вставка/копирование."""
+    try:
+        return widget.winfo_class() in INPUT_CLASSES
+    except Exception:
+        return False
+
+
+def _int_attr(event, name):
+    try:
+        return int(getattr(event, name, 0) or 0)
+    except Exception:
+        return 0
+
+
+def event_state(event):
+    return _int_attr(event, "state")
+
+
+def event_keycode(event):
+    return _int_attr(event, "keycode")
+
+
+def event_keysym(event):
+    return str(getattr(event, "keysym", "") or "")
+
+
+def shortcut_action(event):
+    """Команда редактирования для Ctrl+клавиша (по коду клавиши) или None.
+
+    Код клавиши не зависит от раскладки: Ctrl+V — это V=86 и при английской,
+    и при русской раскладке.
+    """
+    if event is None:
+        return None
+    if not event_state(event) & CONTROL_STATE:
+        return None
+    keycode = event_keycode(event)
+    for action, codes in CONTROL_KEYCODES.items():
+        if keycode in codes:
+            return action
+    return None
+
+
 class ClipboardMenu:
     """ПКМ по полю: Вырезать / Копировать / Вставить / Выделить всё."""
 
@@ -1414,32 +1515,62 @@ class ClipboardMenu:
         self.menu.add_separator()
         self.menu.add_command(label="ВЫДЕЛИТЬ ВСЁ    Ctrl+A", command=self._select_all)
         self._target = None
-        # Win+V: история буфера Windows подставляет текст так же, как обычный буфер,
-        # но после выбора пункта нам нужно «догнать» вставку, поэтому следим за буфером.
-        self._last_clip = ""
-        self._watch_widget = None
-        self._watch_after = None
-        self._watch_armed = False
         # не «залипающее» меню: закрывается по клику вне его
         self.menu.bind("<FocusOut>", lambda e: self.menu.unpost())
 
     def _widget(self, event):
         w = event.widget
-        try:
-            if w.winfo_class() in ("TEntry", "Entry", "Text"):
-                return w
-        except Exception:
-            pass
-        return None
+        return w if is_input_widget(w) else None
 
     def bind(self, widget):
         widget.bind("<Button-3>", self.popup, add="+")
         return widget
 
     def bind_tree(self, widget):
+        """ПКМ-меню и горячие клавиши для виджета и всех его детей."""
         self.bind(widget)
+        if is_input_widget(widget):
+            widget.bind("<Control-KeyPress>", self.on_control_key, add="+")
         for child in widget.winfo_children():
             self.bind_tree(child)
+
+    def _target_for(self, event=None):
+        """Поле, к которому относится нажатие: виджет события или фокус."""
+        widget = getattr(event, "widget", None) if event is not None else None
+        if is_input_widget(widget):
+            return widget
+        try:
+            widget = self.root.focus_get()
+        except Exception:
+            widget = None
+        return widget if is_input_widget(widget) else None
+
+    def _run_shortcut(self, widget, action):
+        """Выполнить команду штатным виртуальным событием Tk."""
+        virtual = SHORTCUT_EVENTS[action]
+        if widget is None:
+            return None
+        try:
+            widget.event_generate(virtual)
+        except Exception:
+            return None
+        return "break"
+
+    def on_control_key(self, event):
+        """Ctrl+V / Ctrl+C / Ctrl+X / Ctrl+A при любой раскладке.
+
+        При латинском keysym команду штатно выполнит сам Tk (привязки
+        <Control-v>, <<Paste>> и т.п.), поэтому ничего не делаем — иначе
+        текст вставится дважды. Если keysym не латинский (русская
+        раскладка: «м», «с», «ч», «ф»), штатные привязки молчат —
+        распознаём клавишу по коду и выполняем действие вручную.
+        """
+        action = shortcut_action(event)
+        if action is None:
+            return None
+        if event_keysym(event) in LATIN_SHORTCUT_KEYSYMS[action]:
+            return None
+        return self._run_shortcut(self._target_for(event), action)
 
     def _cls(self, w):
         try:
@@ -1498,57 +1629,12 @@ class ClipboardMenu:
         except Exception:
             pass
 
-    # --- слежение за буфером (Win+V) --------------------------------------
+    # --- буфер ------------------------------------------------------------
     def _read_clip(self):
         try:
             return self.root.clipboard_get()
         except Exception:
             return ""
-
-    def watch_begin(self, widget):
-        """Запомнили поле и текущий буфер — ждём, пока Win+V подменит содержимое."""
-        self._watch_widget = widget
-        self._last_clip = self._read_clip()
-        self._watch_armed = True
-        if self._watch_after is not None:
-            try:
-                self.root.after_cancel(self._watch_after)
-            except Exception:
-                pass
-        self._watch_after = self.root.after(150, self._watch_tick)
-
-    def _watch_tick(self):
-        self._watch_after = None
-        if not self._watch_armed:
-            return
-        w = self._watch_widget
-        try:
-            alive = w is not None and w.winfo_exists()
-        except Exception:
-            alive = False
-        if not alive:
-            self._watch_armed = False
-            return
-        cur = self._read_clip()
-        if cur and cur != self._last_clip:
-            self._watch_armed = False
-            self._watch_widget = None
-            self._target = w
-            # ставим каретку в конец поля и вставляем новое содержимое
-            try:
-                w.icursor("end")
-            except Exception:
-                try:
-                    w.mark_set("insert", "end")
-                except Exception:
-                    pass
-            self._insert_text(w, cur)
-            try:
-                w.focus_force()
-            except Exception:
-                pass
-            return
-        self._watch_after = self.root.after(200, self._watch_tick)
 
     def _insert_text(self, w, text):
         try:
@@ -1570,7 +1656,6 @@ class ClipboardMenu:
         if w is None:
             return "break"
         self._target = w
-        self._last_clip = self._read_clip()
         try:
             self.menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -1578,130 +1663,22 @@ class ClipboardMenu:
         return "break"
 
 
-def install_global_watch(menu, root, interval=700):
-    """Фоновый сторож: ловит изменения буфера Windows (в т.ч. выбор из истории Win+V)
-    и вставляет выбранный текст в активное поле, если пользователь сам его не вставил."""
-
-    state = {"last": menu._read_clip(), "skip": 0}
-
-    def tick():
-        try:
-            cur = menu._read_clip()
-        except Exception:
-            cur = ""
-        if cur and cur != state["last"]:
-            state["last"] = cur
-            w = None
-            try:
-                w = root.focus_get()
-            except Exception:
-                w = None
-            try:
-                is_field = w is not None and w.winfo_class() in ("TEntry", "Entry", "Text")
-            except Exception:
-                is_field = False
-            if is_field and not menu._watch_armed:
-                before = ""
-                try:
-                    before = w.get()
-                except Exception:
-                    pass
-                if cur not in (before or ""):
-                    menu._insert_text(w, cur)
-                    state["skip"] = 2
-        try:
-            root.after(interval, tick)
-        except Exception:
-            pass
-
-    root.after(interval, tick)
-
-
 def install_clipboard(root):
-    """Ctrl+C / Ctrl+V / Ctrl+X / Ctrl+A + Shift+Ins / Ctrl+Ins для всех полей."""
+    """Ctrl+C / Ctrl+V / Ctrl+X / Ctrl+A + Shift+Ins / Ctrl+Ins для всех полей.
+
+    Латинскую раскладку Tk понимает сам; для нелатинской (русской) раскладки
+    в ClipboardMenu есть обработчик по коду клавиши — иначе Ctrl+V приходит с
+    keysym «м» и штатные привязки <<Paste>> / <Control-v> не срабатывают.
+    Поля конкретного окна подключаются через clipboard.bind_tree(...) — так
+    диалоги (например, «ПРОФИЛЬ ПРОВАЙДЕРА») получают обработчики для своих
+    полей, созданных позже.
+    """
     menu = ClipboardMenu(root)
-
-    def cur():
+    for klass in INPUT_CLASSES:
         try:
-            return root.focus_get()
-        except Exception:
-            return None
-
-    def do(action):
-        def handler(_=None):
-            menu._target = cur()
-            action()
-            return "break"
-        return handler
-
-    # 1) на каждый текущий виджет ввода — «свои» биндинги (высший приоритет)
-    def bind_to(widget):
-        try:
-            if widget.winfo_class() in ("TEntry", "Entry", "Text"):
-                for seq, fn in (
-                    ("<Control-c>", do(menu._copy)), ("<Control-v>", do(menu._paste)),
-                    ("<Control-x>", do(menu._cut)), ("<Control-a>", do(menu._select_all)),
-                ):
-                    widget.bind(seq, fn, add="+")
+            root.bind_class(klass, "<Control-KeyPress>", menu.on_control_key, add="+")
         except Exception:
             pass
-        for child in widget.winfo_children():
-            bind_to(child)
-
-    bind_to(root)
-    # 2) первая линия: классы виджетов
-    for klass, seq, fn in (
-        ("TEntry", "<Control-c>", do(menu._copy)),
-        ("TEntry", "<Control-v>", do(menu._paste)),
-        ("TEntry", "<Control-x>", do(menu._cut)),
-        ("TEntry", "<Control-a>", do(menu._select_all)),
-        ("Text", "<Control-c>", do(menu._copy)),
-        ("Text", "<Control-v>", do(menu._paste)),
-        ("Text", "<Control-x>", do(menu._cut)),
-        ("Text", "<Control-a>", do(menu._select_all)),
-    ):
-        try:
-            root.bind_class(klass, seq, fn, add="+")
-        except Exception:
-            pass
-    # 3) резерв: любые нестандартные поля (Entry с show=, combobox и т.п.)
-    for seq, fn in (
-        ("<Control-c>", do(menu._copy)),
-        ("<Control-v>", do(menu._paste)),
-        ("<Control-x>", do(menu._cut)),
-        ("<Control-a>", do(menu._select_all)),
-        ("<Control-Insert>", do(menu._copy)),
-        ("<Shift-Insert>", do(menu._paste)),
-    ):
-        try:
-            root.bind_all(seq, fn, add="+")
-        except Exception:
-            pass
-    def do_winv(_=None):
-        """Win+V: системный диалог истории буфера выберет текст — мы подхватим его."""
-        w = cur()
-        if w is not None:
-            menu.watch_begin(w)
-        return None   # не глушим событие: пусть Windows откроет историю
-
-    # Tk не знает keysym Win/Super (их перехватывает сама Windows), поэтому
-    # расширенные клавиши регистрируем «тихо» и, главное, взводим слежение за буфером
-    # на обычных Ctrl+V / Shift+Insert: когда Windows подменит буфер через Win+V,
-    # наш сторож подхватит текст и вставит его в поле.
-    for seq in ("<Control-KeyPress-v>", "<Shift-KeyPress-Insert>", "<Control-Insert>"):
-        def arm(event, _seq=seq):
-            w = menu._widget(event)
-            if w is not None:
-                menu.watch_begin(w)
-            return None
-        try:
-            root.bind_all(seq, arm, add="+")
-        except Exception:
-            pass
-    try:
-        install_global_watch(menu, root)
-    except Exception:
-        pass
     return menu
 
 
