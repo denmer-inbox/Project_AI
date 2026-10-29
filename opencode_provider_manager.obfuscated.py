@@ -29,24 +29,26 @@ APP_TITLE = 'OpenCode — менеджер провайдеров'
 PACKAGES = ['@ai-sdk/openai-compatible', '@ai-sdk/openai', '@ai-sdk/anthropic', '@ai-sdk/google']
 
 class _b:
-    _T1 = '#010206'
-    _T2 = '#04101a'
-    _T3 = '#071a26'
-    _T4 = '#020a12'
-    _T5 = '#0e2b3a'
-    _T6 = '#6df4ff'
-    _T7 = '#a6f0ff'
-    _T8 = '#2b6a7a'
-    _T9 = '#ffc16b'
-    _T10 = '#ff5568'
-    _T11 = '#6dffb0'
-    _T12 = '#d9fbff'
-    _T13 = '#93c2d4'
-    _T14 = ('Consolas', 10)
-    _T15 = ('Consolas', 9)
-    _T16 = ('Consolas', 12, 'bold')
-    _T17 = ('Consolas', 18, 'bold')
-    _T18 = ('Segoe UI', 10)
+    bg = '#010206'
+    bg_panel = '#04101a'
+    bg_panel_hi = '#071a26'
+    bg_input = '#020a12'
+    line = '#0e2b3a'
+    cyan = '#6df4ff'
+    cyan_soft = '#a6f0ff'
+    cyan_dim = '#2b6a7a'
+    amber = '#ffc16b'
+    red = '#ff5568'
+    green = '#6dffb0'
+    ink = '#d9fbff'
+    ink_dim = '#93c2d4'
+    panel_fill = '#061722'
+    panel_edge = '#1d5a6e'
+    mono = ('Consolas', 10)
+    mono_small = ('Consolas', 9)
+    mono_title = ('Consolas', 12, 'bold')
+    mono_big = ('Consolas', 18, 'bold')
+    ui = ('Segoe UI', 10)
 
 def _c(_Lb) -> None:
     _Lc = ttk.Style(_Lb)
@@ -54,30 +56,198 @@ def _c(_Lb) -> None:
         _Lc.theme_use('clam')
     except tk.TclError:
         pass
-    _Lc.configure('.', background=_b._T1, foreground=_b._T12, fieldbackground=_b._T4, font=_b._T18, bordercolor=_b._T5)
-    _Lc.configure('TFrame', background=_b._T1)
-    _Lc.configure('TLabel', background=_b._T1, foreground=_b._T12, font=_b._T18)
-    _Lc.configure('TButton', background=_b._T3, foreground=_b._T7, bordercolor=_b._T8, focuscolor=_b._T6, font=_b._T15, padding=(10, 6))
-    _Lc.map('TButton', background=[('active', '#0b2c3d'), ('disabled', _b._T2)], foreground=[('disabled', _b._T8)])
-    _Lc.configure('Accent.TButton', background='#0b3547', foreground=_b._T6, bordercolor=_b._T6, font=_b._T15, padding=(10, 6))
+    _Lc.configure('.', background=_b.bg, foreground=_b.ink, fieldbackground=_b.bg_input, font=_b.ui, bordercolor=_b.line)
+    _Lc.configure('TFrame', background=_b.bg)
+    _Lc.configure('TLabel', background=_b.bg, foreground=_b.ink, font=_b.ui)
+    _Lc.configure('TButton', background=_b.bg_panel_hi, foreground=_b.cyan_soft, bordercolor=_b.cyan_dim, focuscolor=_b.cyan, font=_b.mono_small, padding=(10, 6))
+    _Lc.map('TButton', background=[('active', '#0b2c3d'), ('disabled', _b.bg_panel)], foreground=[('disabled', _b.cyan_dim)])
+    _Lc.configure('Accent.TButton', background='#0b3547', foreground=_b.cyan, bordercolor=_b.cyan, font=_b.mono_small, padding=(10, 6))
     _Lc.map('Accent.TButton', background=[('active', '#0f4a61')])
-    _Lc.configure('Danger.TButton', background='#2a0d13', foreground=_b._T10, bordercolor='#7a2230', font=_b._T15, padding=(10, 6))
+    _Lc.configure('Danger.TButton', background='#2a0d13', foreground=_b.red, bordercolor='#7a2230', font=_b.mono_small, padding=(10, 6))
     _Lc.map('Danger.TButton', background=[('active', '#3d121b')])
-    _Lc.configure('TEntry', fieldbackground=_b._T4, foreground=_b._T7, insertcolor=_b._T6, bordercolor=_b._T8, lightcolor=_b._T5, darkcolor=_b._T4, padding=6, font=_b._T14)
-    _Lc.map('TEntry', bordercolor=[('focus', _b._T6)])
-    _Lc.configure('TCombobox', fieldbackground=_b._T4, background=_b._T3, foreground=_b._T7, arrowcolor=_b._T6, bordercolor=_b._T8, padding=4)
-    _Lc.map('TCombobox', fieldbackground=[('readonly', _b._T4)], foreground=[('readonly', _b._T7)])
-    _Lc.configure('Treeview', background=_b._T2, fieldbackground=_b._T2, foreground=_b._T12, rowheight=24, font=_b._T15, bordercolor=_b._T5)
-    _Lc.map('Treeview', background=[('selected', '#0b3547')], foreground=[('selected', _b._T6)])
-    _Lc.configure('Treeview.Heading', background=_b._T3, foreground=_b._T13, font=_b._T15, relief='flat')
-    _Lc.map('Treeview.Heading', background=[('active', '#0b2c3d')], foreground=[('active', _b._T6)])
-    _Lc.configure('TScrollbar', background=_b._T3, troughcolor=_b._T1, bordercolor=_b._T1, arrowcolor=_b._T8)
-    _Lc.map('TScrollbar', background=[('active', _b._T8)])
+    _Lc.configure('TEntry', fieldbackground=_b.bg_input, foreground=_b.cyan_soft, insertcolor=_b.cyan, bordercolor=_b.cyan_dim, lightcolor=_b.line, darkcolor=_b.bg_input, padding=6, font=_b.mono)
+    _Lc.map('TEntry', bordercolor=[('focus', _b.cyan)])
+    _Lc.configure('TCombobox', fieldbackground=_b.bg_input, background=_b.bg_panel_hi, foreground=_b.cyan_soft, arrowcolor=_b.cyan, bordercolor=_b.cyan_dim, padding=4)
+    _Lc.map('TCombobox', fieldbackground=[('readonly', _b.bg_input)], foreground=[('readonly', _b.cyan_soft)])
+    _Lc.configure('Treeview', background=_b.bg_panel, fieldbackground=_b.bg_panel, foreground=_b.ink, rowheight=24, font=_b.mono_small, bordercolor=_b.line)
+    _Lc.map('Treeview', background=[('selected', '#0b3547')], foreground=[('selected', _b.cyan)])
+    _Lc.configure('Treeview.Heading', background=_b.bg_panel_hi, foreground=_b.ink_dim, font=_b.mono_small, relief='flat')
+    _Lc.map('Treeview.Heading', background=[('active', '#0b2c3d')], foreground=[('active', _b.cyan)])
+    _Lc.configure('TScrollbar', background=_b.bg_panel_hi, troughcolor=_b.bg, bordercolor=_b.bg, arrowcolor=_b.cyan_dim)
+    _Lc.map('TScrollbar', background=[('active', _b.cyan_dim)])
 
 class _d(tk.Canvas):
 
+    def __init__(self, master, width=None, height=None, radius=14, fill=None, outline=None, thickness=1, bg=None, **kw):
+        self.radius = int(radius)
+        self.fill = fill or _b.bg_panel
+        self.outline = outline or _b.line
+        self.thickness = int(thickness)
+        outer_bg = bg or (master.cget('bg') if hasattr(master, 'cget') else _b.bg)
+        super().__init__(master, bg=outer_bg, highlightthickness=0, bd=0, width=width or 1, height=height or 1, **kw)
+        self.configure(bg=outer_bg)
+        self.inner = tk.Frame(self, bg=self.fill)
+        self._win = self.create_window(0, 0, window=self.inner, anchor='nw')
+        self.bind('<Configure>', self._redraw)
+
+    def _round_rect(self, x1, y1, x2, y2, r, fill='', outline='', width=1, **kw):
+        r = max(0, min(int(r), int((x2 - x1) / 2), int((y2 - y1) / 2)))
+        ids = []
+        if fill:
+            ids.append(self.create_rectangle(x1 + r, y1, x2 - r, y2, fill=fill, outline=''))
+            ids.append(self.create_rectangle(x1, y1 + r, x1 + r, y2 - r, fill=fill, outline=''))
+            ids.append(self.create_rectangle(x2 - r, y1 + r, x2, y2 - r, fill=fill, outline=''))
+            ids.append(self.create_oval(x1, y1, x1 + 2 * r, y1 + 2 * r, fill=fill, outline=''))
+            ids.append(self.create_oval(x2 - 2 * r, y1, x2, y1 + 2 * r, fill=fill, outline=''))
+            ids.append(self.create_oval(x1, y2 - 2 * r, x1 + 2 * r, y2, fill=fill, outline=''))
+            ids.append(self.create_oval(x2 - 2 * r, y2 - 2 * r, x2, y2, fill=fill, outline=''))
+        if outline:
+            w = max(1, int(width))
+            ids.append(self.create_line(x1 + r, y1, x2 - r, y1, fill=outline, width=w))
+            ids.append(self.create_line(x1 + r, y2, x2 - r, y2, fill=outline, width=w))
+            ids.append(self.create_line(x1, y1 + r, x1, y2 - r, fill=outline, width=w))
+            ids.append(self.create_line(x2, y1 + r, x2, y2 - r, fill=outline, width=w))
+            for sx, sy, st in ((1, 1, 90), (0, 1, 0), (0, 0, 270), (1, 0, 180)):
+                ids.append(self.create_arc(x1 if sx else x2 - 2 * r, y1 if sy else y2 - 2 * r, x1 + 2 * r if sx else x2, y1 + 2 * r if sy else y2, start=st, extent=90, style='arc', outline=outline, width=w))
+        return ids
+
+    def _redraw(self, event=None):
+        w = self.winfo_width()
+        h = self.winfo_height()
+        if w < 4 or h < 4:
+            return
+        self.delete('bgshape')
+        pad = max(1, self.thickness)
+        ids = self._round_rect(pad, pad, w - pad, h - pad, self.radius, fill=self.fill, outline=self.outline, width=self.thickness)
+        for i in ids:
+            self.itemconfigure(i, tags='bgshape')
+        self.tag_lower('bgshape')
+        inset = self.thickness + 6
+        self.coords(self._win, inset, inset)
+        self.itemconfigure(self._win, width=max(1, w - inset * 2), height=max(1, h - inset * 2))
+
+class _e(tk.Canvas):
+
+    def __init__(self, master, text='', command=None, style='normal', width=None, height=30, radius=10, font=None, **kw):
+        self._text = text
+        self._command = command
+        self._state = 'normal'
+        self._radius = int(radius)
+        self._font = font or _b.mono_small
+        self._preset = style
+        self._hover = False
+        bg = master.cget('bg') if hasattr(master, 'cget') else _b.bg
+        self._bg = bg
+        w = width or self._measure(text)
+        super().__init__(master, width=w, height=height, bg=bg, highlightthickness=0, bd=0, **kw)
+        self._apply_preset()
+        self._draw()
+        self.bind('<Configure>', lambda e: self._draw())
+        self.bind('<Enter>', self._on_enter)
+        self.bind('<Leave>', self._on_leave)
+        self.bind('<Button-1>', self._on_press)
+        self.bind('<ButtonRelease-1>', self._on_release)
+
+    def _apply_preset(self):
+        if self._preset == 'accent':
+            self._fill, self._edge, self._fg = ('#0b3547', _b.cyan, _b.cyan)
+        elif self._preset == 'danger':
+            self._fill, self._edge, self._fg = ('#2a0d13', _b.red, _b.red)
+        else:
+            self._fill, self._edge, self._fg = (_b.bg_panel_hi, _b.cyan_dim, _b.cyan_soft)
+        self._fill_hover = '#0f4a61' if self._preset == 'accent' else '#3d121b' if self._preset == 'danger' else '#0b2c3d'
+        self._fill_down = '#124a5f'
+
+    def _measure(self, text):
+        try:
+            import tkinter.font as tkfont
+            f = tkfont.Font(font=self._font)
+            return f.measure(text) + 28
+        except Exception:
+            return max(90, len(text) * 8)
+
+    def _round(self, x1, y1, x2, y2, r, fill, outline):
+        self.create_rectangle(x1 + r, y1, x2 - r, y2, fill=fill, outline='')
+        self.create_rectangle(x1, y1 + r, x1 + r, y2 - r, fill=fill, outline='')
+        self.create_rectangle(x2 - r, y1 + r, x2, y2 - r, fill=fill, outline='')
+        self.create_oval(x1, y1, x1 + 2 * r, y1 + 2 * r, fill=fill, outline='')
+        self.create_oval(x2 - 2 * r, y1, x2, y1 + 2 * r, fill=fill, outline='')
+        self.create_oval(x1, y2 - 2 * r, x1 + 2 * r, y2, fill=fill, outline='')
+        self.create_oval(x2 - 2 * r, y2 - 2 * r, x2, y2, fill=fill, outline='')
+        for ax1, ay1, ax2, ay2, st in ((x1, y1, x1 + 2 * r, y1 + 2 * r, 90), (x2 - 2 * r, y1, x2, y1 + 2 * r, 0), (x1, y2 - 2 * r, x1 + 2 * r, y2, 180), (x2 - 2 * r, y2 - 2 * r, x2, y2, 270)):
+            self.create_arc(ax1, ay1, ax2, ay2, start=st, extent=90, style='arc', outline=outline)
+
+    def _draw(self):
+        self.delete('all')
+        w = self.winfo_width() or int(self.cget('width'))
+        h = self.winfo_height() or int(self.cget('height'))
+        fill = self._fill_hover if self._hover else self._fill
+        if self._state == 'disabled':
+            fill, edge, fg = (_b.bg_panel, _b.cyan_dim, _b.cyan_dim)
+        else:
+            edge, fg = (self._edge, self._fg)
+        self._round(1, 1, w - 1, h - 1, self._radius, fill, edge)
+        self.create_text(w / 2, h / 2, text=self._text, fill=fg, font=self._font)
+
+    def _on_enter(self, _=None):
+        self._hover = True
+        self._draw()
+
+    def _on_leave(self, _=None):
+        self._hover = False
+        self._draw()
+
+    def _on_press(self, _=None):
+        if self._state == 'disabled':
+            return
+        self.delete('all')
+        w = self.winfo_width()
+        h = self.winfo_height()
+        self._round(1, 1, w - 1, h - 1, self._radius, self._fill_down, self._edge)
+        self.create_text(w / 2, h / 2, text=self._text, fill=self._fg, font=self._font)
+
+    def _on_release(self, _=None):
+        if self._state == 'disabled':
+            return
+        self._draw()
+        if self._command:
+            self._command()
+
+    def configure(self, cnf=None, **kw):
+        if 'state' in kw:
+            self._state = kw.pop('state')
+        if 'text' in kw:
+            self._text = kw.pop('text')
+        if 'command' in kw:
+            self._command = kw.pop('command')
+        if kw:
+            try:
+                super().configure(cnf, **kw)
+            except Exception:
+                pass
+        self._draw()
+    config = configure
+
+    def cget(self, key):
+        if key == 'state':
+            return self._state
+        if key == 'text':
+            return self._text
+        if key == 'command':
+            return self._command
+        try:
+            return super().cget(key)
+        except Exception:
+            return ''
+
+    def invoke(self):
+        if self._command and self._state != 'disabled':
+            self._command()
+
+class _f(tk.Canvas):
+
     def __init__(self, master, height=2, color='#6df4ff', **kw):
-        super().__init__(master, height=height, bg=_b._T1, highlightthickness=0, **kw)
+        super().__init__(master, height=height, bg=_b.bg, highlightthickness=0, **kw)
         self._color = color
         self._h = height
         self.bind('<Configure>', lambda e: self._draw(e.width))
@@ -85,33 +255,33 @@ class _d(tk.Canvas):
     def _draw(self, w):
         self.delete('all')
         h = self._h
-        self.create_line(0, h // 2, w, h // 2, fill=_b._T5)
+        self.create_line(0, h // 2, w, h // 2, fill=_b.line)
         self.create_line(0, h // 2, max(0, w // 3), h // 2, fill=self._color)
 _CTX_CACHE: dict = {}
 
-def _e():
-    _Lg = []
-    _Li = os.environ.get('SSL_CERT_FILE')
-    if _Li:
-        _Lg.append(Path(_Li))
+def _g():
+    _Ld = []
+    _Le = os.environ.get('SSL_CERT_FILE')
+    if _Le:
+        _Ld.append(Path(_Le))
     try:
         import certifi
-        _Lg.append(Path(certifi.where()))
+        _Ld.append(Path(certifi.where()))
     except Exception:
         pass
-    _Lh = Path(sys.prefix) / 'Lib' / 'site-packages'
-    _Lg += [_Lh / 'pip' / '_vendor' / 'certifi' / 'cacert.pem', Path('C:\\Program Files\\Git\\mingw64\\etc\\ssl\\certs\\ca-bundle.crt'), Path('C:\\Program Files\\Git\\usr\\ssl\\certs\\ca-bundle.crt'), Path('C:\\Program Files\\Common Files\\SSL\\cert.pem')]
-    _Lf = []
-    for _Ld in _Lg:
+    _Lf = Path(sys.prefix) / 'Lib' / 'site-packages'
+    _Ld += [_Lf / 'pip' / '_vendor' / 'certifi' / 'cacert.pem', Path('C:\\Program Files\\Git\\mingw64\\etc\\ssl\\certs\\ca-bundle.crt'), Path('C:\\Program Files\\Git\\usr\\ssl\\certs\\ca-bundle.crt'), Path('C:\\Program Files\\Common Files\\SSL\\cert.pem')]
+    _Lg = []
+    for _Lh in _Ld:
         try:
-            if _Ld and _Ld.is_file() and (_Ld.stat().st_size > 4096):
-                if str(_Ld).lower() not in [str(_Le).lower() for _Le in _Lf]:
-                    _Lf.append(_Ld)
+            if _Lh and _Lh.is_file() and (_Lh.stat().st_size > 4096):
+                if str(_Lh).lower() not in [str(_Li).lower() for _Li in _Lg]:
+                    _Lg.append(_Lh)
         except OSError:
             continue
-    return _Lf
+    return _Lg
 
-def _f(_Lj, _Lk):
+def _h(_Lj, _Lk):
     try:
         with socket.create_connection((_Lk, 443), timeout=8) as _Ll:
             with _Lj.wrap_socket(_Ll, server_hostname=_Lk):
@@ -121,151 +291,151 @@ def _f(_Lj, _Lk):
     except Exception:
         return True
 
-def _g(_Lm):
+def _i(_Lm):
     _Lm = (_Lm or '').lower()
     if _Lm in _CTX_CACHE:
         return _CTX_CACHE[_Lm]
-    _Lp = ssl.create_default_context()
-    _Lq = _f(_Lp, _Lm)
-    if not _Lq:
-        for _Ln in _e():
+    _Ln = ssl.create_default_context()
+    _Lo = _h(_Ln, _Lm)
+    if not _Lo:
+        for _Lp in _g():
             try:
-                _Lo = ssl.create_default_context(cafile=str(_Ln))
+                _Lq = ssl.create_default_context(cafile=str(_Lp))
             except Exception:
                 continue
-            if _f(_Lo, _Lm):
-                _Lp, _Lq = (_Lo, True)
+            if _h(_Lq, _Lm):
+                _Ln, _Lo = (_Lq, True)
                 break
-    _CTX_CACHE[_Lm] = _Lp
-    return _Lp
+    _CTX_CACHE[_Lm] = _Ln
+    return _Ln
 
-def _h() -> Path:
-    _Ls = os.environ.get('XDG_CONFIG_HOME')
-    _Lr = Path(_Ls) if _Ls else Path.home() / '.config'
-    return _Lr / 'opencode' / 'opencode.json'
+def _j() -> Path:
+    _Lr = os.environ.get('XDG_CONFIG_HOME')
+    _Ls = Path(_Lr) if _Lr else Path.home() / '.config'
+    return _Ls / 'opencode' / 'opencode.json'
 
-def _i(_Lt: str) -> str:
-    _Lz, _Lw, _L0, _Lx, _Ly = ([], 0, len(_Lt), False, False)
-    while _Lw < _L0:
-        _Lu = _Lt[_Lw]
-        _Lv = _Lt[_Lw + 1] if _Lw + 1 < _L0 else ''
+def _k(_Lt: str) -> str:
+    _Lu, _Lv, _Lw, _Lx, _Ly = ([], 0, len(_Lt), False, False)
+    while _Lv < _Lw:
+        _Lz = _Lt[_Lv]
+        _L0 = _Lt[_Lv + 1] if _Lv + 1 < _Lw else ''
         if _Lx:
-            _Lz.append(_Lu)
+            _Lu.append(_Lz)
             if _Ly:
                 _Ly = False
-            elif _Lu == '\\':
+            elif _Lz == '\\':
                 _Ly = True
-            elif _Lu == '"':
+            elif _Lz == '"':
                 _Lx = False
-            _Lw += 1
+            _Lv += 1
             continue
-        if _Lu == '"':
+        if _Lz == '"':
             _Lx = True
-            _Lz.append(_Lu)
-            _Lw += 1
+            _Lu.append(_Lz)
+            _Lv += 1
             continue
-        if _Lu == '/' and _Lv == '/':
-            while _Lw < _L0 and _Lt[_Lw] not in '\r\n':
-                _Lw += 1
+        if _Lz == '/' and _L0 == '/':
+            while _Lv < _Lw and _Lt[_Lv] not in '\r\n':
+                _Lv += 1
             continue
-        if _Lu == '/' and _Lv == '*':
-            _Lw += 2
-            while _Lw < _L0 - 1 and (not (_Lt[_Lw] == '*' and _Lt[_Lw + 1] == '/')):
-                _Lw += 1
-            _Lw += 2
+        if _Lz == '/' and _L0 == '*':
+            _Lv += 2
+            while _Lv < _Lw - 1 and (not (_Lt[_Lv] == '*' and _Lt[_Lv + 1] == '/')):
+                _Lv += 1
+            _Lv += 2
             continue
-        _Lz.append(_Lu)
-        _Lw += 1
-    return re.sub(',(\\s*[}\\]])', '\\1', ''.join(_Lz))
+        _Lu.append(_Lz)
+        _Lv += 1
+    return re.sub(',(\\s*[}\\]])', '\\1', ''.join(_Lu))
 
-def _j(_L1: Path) -> dict:
+def _l(_L1: Path) -> dict:
     if not _L1.exists():
         return {}
-    _L3 = _L1.read_text(encoding='utf-8-sig')
+    _L2 = _L1.read_text(encoding='utf-8-sig')
     try:
-        _L2 = json.loads(_L3)
+        _L3 = json.loads(_L2)
     except json.JSONDecodeError:
-        _L2 = json.loads(_i(_L3))
-    if not isinstance(_L2, dict):
+        _L3 = json.loads(_k(_L2))
+    if not isinstance(_L3, dict):
         raise ValueError('Корень конфига должен быть объектом JSON')
-    return _L2
+    return _L3
 HISTORY_LIMIT = 50
 
-def _k(_L4: Path) -> Path:
+def _m(_L4: Path) -> Path:
     return _L4.parent / 'backups'
 
-def _l(_L5: Path) -> list:
-    _Lab = []
-    _L9 = []
+def _n(_L5: Path) -> list:
+    _L6 = []
+    _L7 = []
     if _L5.exists():
-        _L9 += [_L6 for _L6 in _L5.parent.glob(_L5.name + '.bak-*') if _L6.is_file()]
-    _Laa = _k(_L5)
-    if _Laa.is_dir():
-        _L9 += [_L6 for _L6 in _Laa.glob(_L5.name + '.*.bak') if _L6.is_file()]
-    for _L6 in _L9:
-        _L7 = {'path': _L6, 'name': _L6.name, 'time': None, 'valid': False, 'providers': [], 'model': '', '_mtime': 0}
+        _L7 += [_L9 for _L9 in _L5.parent.glob(_L5.name + '.bak-*') if _L9.is_file()]
+    _L8 = _m(_L5)
+    if _L8.is_dir():
+        _L7 += [_L9 for _L9 in _L8.glob(_L5.name + '.*.bak') if _L9.is_file()]
+    for _L9 in _L7:
+        _Laa = {'path': _L9, 'name': _L9.name, 'time': None, 'valid': False, 'providers': [], 'model': '', '_mtime': 0}
         try:
-            _L7['time'] = datetime.fromtimestamp(_L6.stat().st_mtime)
-            _L7['_mtime'] = _L6.stat().st_mtime
+            _Laa['time'] = datetime.fromtimestamp(_L9.stat().st_mtime)
+            _Laa['_mtime'] = _L9.stat().st_mtime
         except OSError:
             pass
         try:
-            _L8 = _j(_L6)
-            _L7['valid'] = True
-            _L7['providers'] = list((_L8.get('providers') or {}).keys())
-            _L7['model'] = _y(_L8)
+            _Lab = _l(_L9)
+            _Laa['valid'] = True
+            _Laa['providers'] = list((_Lab.get('providers') or {}).keys())
+            _Laa['model'] = _0(_Lab)
         except Exception:
             pass
-        _Lab.append(_L7)
-    _Lab.sort(key=lambda e: e['_mtime'], reverse=True)
-    return _Lab
+        _L6.append(_Laa)
+    _L6.sort(key=lambda e: e['_mtime'], reverse=True)
+    return _L6
 
-def _m(_Lac: Path):
+def _o(_Lac: Path):
     if not _Lac.exists():
         return None
-    _Lag = _k(_Lac)
-    _Lag.mkdir(parents=True, exist_ok=True)
-    _Laf = datetime.now()
-    _Lae = _Laf.strftime('%Y%m%d-%H%M%S') + '-%03d' % (_Laf.microsecond // 1000)
-    _Lad = _Lag / ('%s.%s.bak' % (_Lac.name, _Lae))
-    shutil.copy2(_Lac, _Lad)
-    return _Lad
+    _Lad = _m(_Lac)
+    _Lad.mkdir(parents=True, exist_ok=True)
+    _Lae = datetime.now()
+    _Laf = _Lae.strftime('%Y%m%d-%H%M%S') + '-%03d' % (_Lae.microsecond // 1000)
+    _Lag = _Lad / ('%s.%s.bak' % (_Lac.name, _Laf))
+    shutil.copy2(_Lac, _Lag)
+    return _Lag
 
-def _n(_Lah: Path, _Lai: int=HISTORY_LIMIT) -> None:
-    _Lap = []
-    _Lao = _k(_Lah)
-    if _Lao.is_dir():
-        _Lap.append((_Lao, '*.bak'))
-    _Lap.append((_Lah.parent, _Lah.name + '.bak-*'))
-    for _Laj, _Lak in _Lap:
-        _Lal = sorted((_Lan for _Lan in _Laj.glob(_Lak) if _Lan.is_file()), key=lambda p: p.stat().st_mtime, reverse=True)
-        for _Lam in _Lal[_Lai:]:
+def _p(_Lah: Path, _Lai: int=HISTORY_LIMIT) -> None:
+    _Laj = []
+    _Lak = _m(_Lah)
+    if _Lak.is_dir():
+        _Laj.append((_Lak, '*.bak'))
+    _Laj.append((_Lah.parent, _Lah.name + '.bak-*'))
+    for _Lal, _Lam in _Laj:
+        _Lan = sorted((_Lap for _Lap in _Lal.glob(_Lam) if _Lap.is_file()), key=lambda p: _Lap.stat().st_mtime, reverse=True)
+        for _Lao in _Lan[_Lai:]:
             try:
-                _Lam.unlink()
+                _Lao.unlink()
             except OSError:
                 pass
 
-def _o(_Laq: Path, _Lar: dict):
+def _q(_Laq: Path, _Lar: dict):
     _Laq.parent.mkdir(parents=True, exist_ok=True)
-    _Lat = _m(_Laq)
-    _Las = _Laq.with_name(_Laq.name + '.tmp')
-    _Las.write_text(json.dumps(_Lar, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
-    os.replace(_Las, _Laq)
-    _n(_Laq)
-    return _Lat
+    _Las = _o(_Laq)
+    _Lat = _Laq.with_name(_Laq.name + '.tmp')
+    _Lat.write_text(json.dumps(_Lar, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+    os.replace(_Lat, _Laq)
+    _p(_Laq)
+    return _Las
 
-def _p(_Lau: Path, _Lav: Path):
-    _Lay = _j(_Lav)
-    if not isinstance(_Lay, dict):
+def _r(_Lau: Path, _Lav: Path):
+    _Law = _l(_Lav)
+    if not isinstance(_Law, dict):
         raise ValueError('Снимок не содержит объект JSON')
-    _Lax = _m(_Lau)
-    _Law = _Lau.with_name(_Lau.name + '.tmp')
-    _Law.write_text(_Lav.read_text(encoding='utf-8-sig'), encoding='utf-8')
-    os.replace(_Law, _Lau)
-    _n(_Lau)
+    _Lax = _o(_Lau)
+    _Lay = _Lau.with_name(_Lau.name + '.tmp')
+    _Lay.write_text(_Lav.read_text(encoding='utf-8-sig'), encoding='utf-8')
+    os.replace(_Lay, _Lau)
+    _p(_Lau)
     return _Lax
 
-def _q(_Laz: str) -> str:
+def _s(_Laz: str) -> str:
     _Laz = (_Laz or '').strip()
     if not _Laz:
         return _Laz
@@ -273,26 +443,26 @@ def _q(_Laz: str) -> str:
         _Laz = 'https://' + _Laz
     return _Laz.rstrip('/')
 
-def _r(_La0: str, _La1: str='', _La2: float=15.0):
-    _La8 = urllib.request.Request(_La0, method='GET')
-    _La8.add_header('Accept', 'application/json')
-    _La8.add_header('User-Agent', 'opencode-provider-manager/2.0')
+def _t(_La0: str, _La1: str='', _La2: float=15.0):
+    _La3 = urllib.request.Request(_La0, method='GET')
+    _La3.add_header('Accept', 'application/json')
+    _La3.add_header('User-Agent', 'opencode-provider-manager/2.0')
     if _La1:
-        _La8.add_header('Authorization', 'Bearer ' + _La1)
-    _La7 = urllib.parse.urlsplit(_La0).hostname or ''
+        _La3.add_header('Authorization', 'Bearer ' + _La1)
+    _La4 = urllib.parse.urlsplit(_La0).hostname or ''
     try:
-        with urllib.request.urlopen(_La8, timeout=_La2, context=_g(_La7)) as _La3:
-            _La4 = _La3.read().decode('utf-8', 'replace')
-            _La5 = _La3.status
-    except urllib.error.HTTPError as _La6:
-        _La4 = _La6.read().decode('utf-8', 'replace')
-        _La5 = _La6.code
+        with urllib.request.urlopen(_La3, timeout=_La2, context=_i(_La4)) as _La6:
+            _La7 = _La6.read().decode('utf-8', 'replace')
+            _La8 = _La6.status
+    except urllib.error.HTTPError as _La5:
+        _La7 = _La5.read().decode('utf-8', 'replace')
+        _La8 = _La5.code
     try:
-        return (_La5, json.loads(_La4))
+        return (_La8, json.loads(_La7))
     except Exception:
-        return (_La5, _La4)
+        return (_La8, _La7)
 
-def _s(_La9, _Lba) -> dict:
+def _u(_La9, _Lba) -> dict:
     try:
         _La9 = float(_La9)
         _Lbc = float(_Lba)
@@ -301,56 +471,56 @@ def _s(_La9, _Lba) -> dict:
     if not _Lbc or _Lbc <= 0:
         return {}
     _Lbb = _La9 / _Lbc
-    return {'tokens_by_coef': int(_Lbb), 'text': _v(int(_Lbb))}
+    return {'tokens_by_coef': int(_Lbb), 'text': _x(int(_Lbb))}
 
-def _t(_Lbd: str, _Lbe: str) -> dict:
-    _Lbo = _q(_Lbd)
-    if not _Lbo:
+def _v(_Lbd: str, _Lbe: str) -> dict:
+    _Lbf = _s(_Lbd)
+    if not _Lbf:
         raise ValueError('Не задан URL провайдера')
-    _Lbn = [_Lbo]
-    if re.search('/v\\d+[a-z]?$', _Lbo, re.I):
-        _Lbn.append(_Lbo[:_Lbo.rfind('/')])
-    _Lbm = []
-    for _Lbf in _Lbn:
-        for _Lbg in ('/balance', '/credits', '/usage'):
-            _Lbh = _Lbf + _Lbg
+    _Lbg = [_Lbf]
+    if re.search('/v\\d+[a-z]?$', _Lbf, re.I):
+        _Lbg.append(_Lbf[:_Lbf.rfind('/')])
+    _Lbh = []
+    for _Lbi in _Lbg:
+        for _Lbj in ('/balance', '/credits', '/usage'):
+            _Lbk = _Lbi + _Lbj
             try:
-                _Lbj, _Lbk = _r(_Lbh, _Lbe)
+                _Lbn, _Lbo = _t(_Lbk, _Lbe)
             except Exception as _Lbl:
-                _Lbm.append('%s: %s' % (_Lbh, _Lbl))
+                _Lbh.append('%s: %s' % (_Lbk, _Lbl))
                 continue
-            if _Lbj == 404:
+            if _Lbn == 404:
                 continue
-            if _Lbj in (401, 403):
-                raise PermissionError('Сервер отклонил ключ (HTTP %s)' % _Lbj)
-            if _Lbj >= 400:
-                _Lbm.append('%s: HTTP %s' % (_Lbh, _Lbj))
+            if _Lbn in (401, 403):
+                raise PermissionError('Сервер отклонил ключ (HTTP %s)' % _Lbn)
+            if _Lbn >= 400:
+                _Lbh.append('%s: HTTP %s' % (_Lbk, _Lbn))
                 continue
-            if not isinstance(_Lbk, dict):
+            if not isinstance(_Lbo, dict):
                 continue
-            _Lbi = _u(_Lbk)
-            if _Lbi:
-                _Lbi['url'] = _Lbh
-                _Lbi['raw'] = _Lbk
-                return _Lbi
-    raise RuntimeError('Эндпоинт баланса не найден. Проверено: %d адрес(ов). Последние ошибки: %s' % (len(_Lbm), '; '.join(_Lbm[-3:]) or '—'))
+            _Lbm = _w(_Lbo)
+            if _Lbm:
+                _Lbm['url'] = _Lbk
+                _Lbm['raw'] = _Lbo
+                return _Lbm
+    raise RuntimeError('Эндпоинт баланса не найден. Проверено: %d адрес(ов). Последние ошибки: %s' % (len(_Lbh), '; '.join(_Lbh[-3:]) or '—'))
 
-def _u(data: dict) -> dict:
+def _w(data: dict) -> dict:
     out = {'tokens': None, 'usd': None, 'text': ''}
 
-    def as_int(_Ldx):
+    def as_int(_Les):
         try:
-            if isinstance(_Ldx, bool) or _Ldx is None:
+            if isinstance(_Les, bool) or _Les is None:
                 return None
-            return int(float(_Ldx))
+            return int(float(_Les))
         except Exception:
             return None
 
-    def as_float(_Ldy):
+    def as_float(_Let):
         try:
-            if isinstance(_Ldy, bool) or _Ldy is None:
+            if isinstance(_Let, bool) or _Let is None:
                 return None
-            return float(_Ldy)
+            return float(_Let)
         except Exception:
             return None
     for k in ('token_balance', 'balance_tokens', 'tokens_left', 'tokens', 'credit_tokens'):
@@ -377,11 +547,11 @@ def _u(data: dict) -> dict:
     if out['usd'] is not None:
         parts.append('%.2f' % out['usd'])
     if out['tokens'] is not None:
-        parts.append(_v(out['tokens']))
+        parts.append(_x(out['tokens']))
     out['text'] = ' • '.join(parts) if parts else ''
     return out
 
-def _v(_Lbp) -> str:
+def _x(_Lbp) -> str:
     try:
         _Lbp = int(_Lbp)
     except Exception:
@@ -394,217 +564,217 @@ def _v(_Lbp) -> str:
         return '%.1f тыс. токенов' % (_Lbp / 1000)
     return '%d токенов' % _Lbp
 
-def _w(_Lbq: str, _Lbr: str) -> list:
-    _Lb2 = _q(_Lbq)
-    if not _Lb2:
+def _y(_Lbq: str, _Lbr: str) -> list:
+    _Lbs = _s(_Lbq)
+    if not _Lbs:
         raise ValueError('Не задан URL провайдера')
-    _Lb1 = []
-    if re.search('/v\\d+[a-z]?$', _Lb2, re.I):
-        _Lb1.append(_Lb2 + '/models')
+    _Lbt = []
+    if re.search('/v\\d+[a-z]?$', _Lbs, re.I):
+        _Lbt.append(_Lbs + '/models')
     else:
-        _Lb1 += [_Lb2 + '/v1/models', _Lb2 + '/models']
-    _Lbw = None
-    for _Lbs in _Lb1:
+        _Lbt += [_Lbs + '/v1/models', _Lbs + '/models']
+    _Lbu = None
+    for _Lbv in _Lbt:
         try:
-            _Lby, _Lbz = _r(_Lbs, _Lbr)
-        except Exception as _Lb0:
-            _Lbw = _Lb0
+            _Lb1, _Lb2 = _t(_Lbv, _Lbr)
+        except Exception as _Lbw:
+            _Lbu = _Lbw
             continue
-        if _Lby == 404:
+        if _Lb1 == 404:
             continue
-        if _Lby in (401, 403):
-            raise PermissionError('Сервер отклонил ключ (HTTP %s)' % _Lby)
-        if _Lby >= 400:
-            raise RuntimeError('HTTP %s при запросе %s' % (_Lby, _Lbs))
-        _Lbt = _Lbz.get('data') or _Lbz.get('models') or [] if isinstance(_Lbz, dict) else _Lbz
-        _Lbu = []
-        for _Lbv in _Lbt or []:
-            if isinstance(_Lbv, str):
-                _Lbv = {'id': _Lbv}
-            if not isinstance(_Lbv, dict):
+        if _Lb1 in (401, 403):
+            raise PermissionError('Сервер отклонил ключ (HTTP %s)' % _Lb1)
+        if _Lb1 >= 400:
+            raise RuntimeError('HTTP %s при запросе %s' % (_Lb1, _Lbv))
+        _Lbx = _Lb2.get('data') or _Lb2.get('models') or [] if isinstance(_Lb2, dict) else _Lb2
+        _Lby = []
+        for _Lbz in _Lbx or []:
+            if isinstance(_Lbz, str):
+                _Lbz = {'id': _Lbz}
+            if not isinstance(_Lbz, dict):
                 continue
-            _Lbx = _Lbv.get('id') or _Lbv.get('name')
-            if not _Lbx:
+            _Lb0 = _Lbz.get('id') or _Lbz.get('name')
+            if not _Lb0:
                 continue
-            _Lbu.append({'id': str(_Lbx), 'display': _Lbv.get('display_name') or _Lbv.get('name') or str(_Lbx), 'context': _Lbv.get('context_window') or _Lbv.get('contextWindow') or _Lbv.get('context_length') or _Lbv.get('max_context_tokens'), 'output': _Lbv.get('max_output_tokens') or _Lbv.get('max_tokens'), 'tools': _Lbv.get('supports_tools'), 'vision': _Lbv.get('supports_vision')})
-        if _Lbu:
-            return sorted(_Lbu, key=lambda m: m['display'].lower())
-        _Lbw = RuntimeError('Сервер вернул пустой список моделей')
-    if isinstance(_Lbw, Exception):
-        raise _Lbw
+            _Lby.append({'id': str(_Lb0), 'display': _Lbz.get('display_name') or _Lbz.get('name') or str(_Lb0), 'context': _Lbz.get('context_window') or _Lbz.get('contextWindow') or _Lbz.get('context_length') or _Lbz.get('max_context_tokens'), 'output': _Lbz.get('max_output_tokens') or _Lbz.get('max_tokens'), 'tools': _Lbz.get('supports_tools'), 'vision': _Lbz.get('supports_vision')})
+        if _Lby:
+            return sorted(_Lby, key=lambda m: m['display'].lower())
+        _Lbu = RuntimeError('Сервер вернул пустой список моделей')
+    if isinstance(_Lbu, Exception):
+        raise _Lbu
     raise RuntimeError('Не удалось получить список моделей')
 
-def _x(_Lb3: dict) -> list:
-    _Lcf = _Lb3.get('providers')
-    _Lce = []
-    if not isinstance(_Lcf, dict):
-        return _Lce
-    for _Lb4, _Lb5 in _Lcf.items():
-        _Lb5 = _Lb5 if isinstance(_Lb5, dict) else {}
-        _Lb6 = _Lb5.get('settings') if isinstance(_Lb5.get('settings'), dict) else {}
-        _Lb7 = _Lb5.get('models') if isinstance(_Lb5.get('models'), dict) else {}
-        _Lb9, _Lca = ([], [])
-        for _Lb8, _Lcb in _Lb7.items():
-            _Lca.append(_Lb8)
-            if isinstance(_Lcb, dict) and _Lcb.get('disabled'):
+def _z(_Lb3: dict) -> list:
+    _Lb4 = _Lb3.get('providers')
+    _Lb5 = []
+    if not isinstance(_Lb4, dict):
+        return _Lb5
+    for _Lb6, _Lb7 in _Lb4.items():
+        _Lb7 = _Lb7 if isinstance(_Lb7, dict) else {}
+        _Lb8 = _Lb7.get('settings') if isinstance(_Lb7.get('settings'), dict) else {}
+        _Lb9 = _Lb7.get('models') if isinstance(_Lb7.get('models'), dict) else {}
+        _Lcb, _Lcc = ([], [])
+        for _Lca, _Lcd in _Lb9.items():
+            _Lcc.append(_Lca)
+            if isinstance(_Lcd, dict) and _Lcd.get('disabled'):
                 continue
-            _Lb9.append(_Lb8)
-        for _Lb8 in _Lca:
-            if _Lb8 not in _Lb9:
+            _Lcb.append(_Lca)
+        for _Lca in _Lcc:
+            if _Lca not in _Lcb:
                 continue
-        _Lce.append({'id': _Lb4, 'display_name': _Lb5.get('name') or _Lb4, 'coefficient': str(_Lb5.get('_coefficient') or ''), 'base_url': _Lb6.get('baseURL') or '', 'api_key': _Lb6.get('apiKey') or '', 'package': _Lb5.get('package') or PACKAGES[0], 'models': _Lb9, 'known_models': _Lca, 'extra_settings': {_Lcc: _Lcd for _Lcc, _Lcd in _Lb6.items() if _Lcc not in ('baseURL', 'apiKey')}, '_raw': copy.deepcopy(_Lb5)})
-    return _Lce
+        _Lb5.append({'id': _Lb6, 'display_name': _Lb7.get('name') or _Lb6, 'coefficient': str(_Lb7.get('_coefficient') or ''), 'base_url': _Lb8.get('baseURL') or '', 'api_key': _Lb8.get('apiKey') or '', 'package': _Lb7.get('package') or PACKAGES[0], 'models': _Lcb, 'known_models': _Lcc, 'extra_settings': {_Lce: _Lcf for _Lce, _Lcf in _Lb8.items() if _Lce not in ('baseURL', 'apiKey')}, '_raw': copy.deepcopy(_Lb7)})
+    return _Lb5
 
-def _y(_Lcg: dict) -> str:
-    _Lcj = _Lcg.get('model')
-    if isinstance(_Lcj, str):
-        return _Lcj
-    if isinstance(_Lcj, dict):
-        _Lch = _Lcj.get('providerID') or ''
-        _Lci = _Lcj.get('model') or _Lcj.get('modelID') or ''
-        if _Lch and _Lci:
-            return '%s/%s' % (_Lch, _Lci)
+def _0(_Lcg: dict) -> str:
+    _Lch = _Lcg.get('model')
+    if isinstance(_Lch, str):
+        return _Lch
+    if isinstance(_Lch, dict):
+        _Lci = _Lch.get('providerID') or ''
+        _Lcj = _Lch.get('model') or _Lch.get('modelID') or ''
+        if _Lci and _Lcj:
+            return '%s/%s' % (_Lci, _Lcj)
     return ''
 
-def _z(_Lck: str):
+def _1(_Lck: str):
     _Lck = (_Lck or '').strip()
     if '/' not in _Lck:
         return ('', '')
     _Lcl, _Lcm = _Lck.split('/', 1)
     return (_Lcl.strip(), _Lcm.strip())
 
-def _0(_Lcn: dict, _Lco=None) -> dict:
-    _Lcr = copy.deepcopy(_Lco) if isinstance(_Lco, dict) else {}
-    _Lcr.pop('disabled', None)
-    _Lcr.setdefault('name', _Lcn.get('display') or _Lcn['id'])
-    _Lcq = _Lcr.get('limit') if isinstance(_Lcr.get('limit'), dict) else {}
+def _2(_Lcn: dict, _Lco=None) -> dict:
+    _Lcp = copy.deepcopy(_Lco) if isinstance(_Lco, dict) else {}
+    _Lcp.pop('disabled', None)
+    _Lcp.setdefault('name', _Lcn.get('display') or _Lcn['id'])
+    _Lcq = _Lcp.get('limit') if isinstance(_Lcp.get('limit'), dict) else {}
     if _Lcn.get('context'):
         _Lcq['context'] = int(_Lcn['context'])
     if _Lcn.get('output'):
         _Lcq['output'] = int(_Lcn['output'])
     if _Lcq:
-        _Lcr['limit'] = _Lcq
-    _Lcp = _Lcr.get('capabilities') if isinstance(_Lcr.get('capabilities'), dict) else {}
+        _Lcp['limit'] = _Lcq
+    _Lcr = _Lcp.get('capabilities') if isinstance(_Lcp.get('capabilities'), dict) else {}
     if _Lcn.get('tools') is not None:
-        _Lcp['tools'] = bool(_Lcn['tools'])
-    _Lcp.setdefault('tools', True)
+        _Lcr['tools'] = bool(_Lcn['tools'])
+    _Lcr.setdefault('tools', True)
     if _Lcn.get('vision'):
-        _Lcp['input'] = ['text', 'image']
-    _Lcp.setdefault('input', ['text'])
-    _Lcp.setdefault('output', ['text'])
-    _Lcr['capabilities'] = _Lcp
-    return _Lcr
+        _Lcr['input'] = ['text', 'image']
+    _Lcr.setdefault('input', ['text'])
+    _Lcr.setdefault('output', ['text'])
+    _Lcp['capabilities'] = _Lcr
+    return _Lcp
 
-def _1(_Lcs):
+def _3(_Lcs):
     if isinstance(_Lcs, dict):
-        return {_Lcu: _1(_Lct) for _Lcu, _Lct in _Lcs.items() if not _Lcu.startswith('_')}
+        return {_Lcu: _3(_Lct) for _Lcu, _Lct in _Lcs.items() if not _Lcu.startswith('_')}
     if isinstance(_Lcs, list):
-        return [_1(_Lct) for _Lct in _Lcs]
+        return [_3(_Lct) for _Lct in _Lcs]
     return _Lcs
 
-def _2(_Lcv: dict, _Lcw: str) -> str:
-    _Lcz = _Lcv.get('providers') or {}
-    _Lcy = _Lcz.get(_Lcw) or {}
-    _Lcx = _Lcy.get('_coefficient')
-    if _Lcx in (None, ''):
+def _4(_Lcv: dict, _Lcw: str) -> str:
+    _Lcx = _Lcv.get('providers') or {}
+    _Lcy = _Lcx.get(_Lcw) or {}
+    _Lcz = _Lcy.get('_coefficient')
+    if _Lcz in (None, ''):
         return ''
-    return str(_Lcx)
+    return str(_Lcz)
 
-def _3(_Lc0: dict) -> dict:
-    _Ldb = {}
-    _Lda = _q(_Lc0.get('base_url', ''))
-    if _Lda:
-        _Ldb['baseURL'] = _Lda
+def _5(_Lc0: dict) -> dict:
+    _Lc1 = {}
+    _Lc2 = _s(_Lc0.get('base_url', ''))
+    if _Lc2:
+        _Lc1['baseURL'] = _Lc2
     if _Lc0.get('api_key'):
-        _Ldb['apiKey'] = _Lc0['api_key']
+        _Lc1['apiKey'] = _Lc0['api_key']
     for _Lc8, _Lc9 in (_Lc0.get('extra_settings') or {}).items():
-        _Ldb[_Lc8] = _Lc9
-    _Lc7 = copy.deepcopy(_Lc0.get('_raw') or {})
-    _Lc6 = str(_Lc0.get('coefficient') or '').strip()
-    if _Lc6:
-        _Lc7['_coefficient'] = _Lc6
-    else:
-        _Lc7.pop('_coefficient', None)
-    _Lc7['name'] = _Lc0.get('display_name') or _Lc0.get('id')
-    _Lc7['package'] = _Lc0.get('package') or PACKAGES[0]
-    if _Ldb:
-        _Lc7['settings'] = _Ldb
-    else:
-        _Lc7.pop('settings', None)
-    _Lc5 = _Lc7.get('models') if isinstance(_Lc7.get('models'), dict) else {}
-    _Lc4 = {}
-    for _Lc1 in _Lc0.get('models') or []:
-        _Lc4[_Lc1] = _0({'id': _Lc1}, _Lc5.get(_Lc1))
-    for _Lc1, _Lc2 in _Lc5.items():
-        if _Lc1 in _Lc4:
-            continue
-        _Lc3 = copy.deepcopy(_Lc2) if isinstance(_Lc2, dict) else {}
-        _Lc3['disabled'] = True
-        _Lc4[_Lc1] = _Lc3
+        _Lc1[_Lc8] = _Lc9
+    _Lc3 = copy.deepcopy(_Lc0.get('_raw') or {})
+    _Lc4 = str(_Lc0.get('coefficient') or '').strip()
     if _Lc4:
-        _Lc7['models'] = _Lc4
+        _Lc3['_coefficient'] = _Lc4
     else:
-        _Lc7.pop('models', None)
-    return _Lc7
+        _Lc3.pop('_coefficient', None)
+    _Lc3['name'] = _Lc0.get('display_name') or _Lc0.get('id')
+    _Lc3['package'] = _Lc0.get('package') or PACKAGES[0]
+    if _Lc1:
+        _Lc3['settings'] = _Lc1
+    else:
+        _Lc3.pop('settings', None)
+    _Lc5 = _Lc3.get('models') if isinstance(_Lc3.get('models'), dict) else {}
+    _Lc6 = {}
+    for _Lc7 in _Lc0.get('models') or []:
+        _Lc6[_Lc7] = _2({'id': _Lc7}, _Lc5.get(_Lc7))
+    for _Lc7, _Lda in _Lc5.items():
+        if _Lc7 in _Lc6:
+            continue
+        _Ldb = copy.deepcopy(_Lda) if isinstance(_Lda, dict) else {}
+        _Ldb['disabled'] = True
+        _Lc6[_Lc7] = _Ldb
+    if _Lc6:
+        _Lc3['models'] = _Lc6
+    else:
+        _Lc3.pop('models', None)
+    return _Lc3
 
-def _4(_Ldc: dict, _Ldd: list) -> dict:
-    _Ldh = copy.deepcopy(_Ldc)
-    if not isinstance(_Ldh.get('providers'), dict):
-        _Ldh['providers'] = {}
-    _Ldh['providers'] = {_Ldg['id']: _3(_Ldg) for _Ldg in _Ldd}
-    _Ldf = _y(_Ldh)
-    _Lde = _z(_Ldf)[0]
-    if _Ldf and _Lde not in _Ldh['providers']:
-        _Ldh.pop('model', None)
-    return _Ldh
+def _6(_Ldc: dict, _Ldd: list) -> dict:
+    _Lde = copy.deepcopy(_Ldc)
+    if not isinstance(_Lde.get('providers'), dict):
+        _Lde['providers'] = {}
+    _Lde['providers'] = {_Ldh['id']: _5(_Ldh) for _Ldh in _Ldd}
+    _Ldf = _0(_Lde)
+    _Ldg = _1(_Ldf)[0]
+    if _Ldf and _Ldg not in _Lde['providers']:
+        _Lde.pop('model', None)
+    return _Lde
+EXPORT_TYPE = 'opencode-provider-profiles'
+EXPORT_VERSION = 2
+EXPORT_TYPE_SINGLE = 'opencode-provider-profile'
 
-_EXPORT_TYPE = 'opencode-provider-profiles'
-_EXPORT_VERSION = 2
+def _7(_Ldi: dict) -> dict:
+    return {'id': _Ldi['id'], 'display_name': _Ldi['display_name'], 'coefficient': str(_Ldi.get('coefficient') or ''), 'base_url': _Ldi['base_url'], 'package': _Ldi['package'], 'api_key': _Ldi['api_key'], 'models': list(_Ldi['models']), 'known_models': list(_Ldi['known_models']), 'extra_settings': _Ldi.get('extra_settings') or {}, 'raw': _Ldi.get('_raw') or {}}
 
-def _profile_to_export(_Lp: dict) -> dict:
-    return {'id': _Lp['id'], 'display_name': _Lp['display_name'], 'coefficient': str(_Lp.get('coefficient') or ''), 'base_url': _Lp['base_url'], 'package': _Lp['package'], 'api_key': _Lp['api_key'], 'models': list(_Lp['models']), 'known_models': list(_Lp['known_models']), 'extra_settings': _Lp.get('extra_settings') or {}, 'raw': _Lp.get('_raw') or {}}
+def _8(_Ldj: list, _Ldk: str='') -> dict:
+    _Ldl = {'version': EXPORT_VERSION, 'type': EXPORT_TYPE, 'profiles': [_7(_Ldn) for _Ldn in _Ldj]}
+    _Ldm = (_Ldk or '').strip()
+    if _Ldm and _Ldm != '(не задана)':
+        _Ldl['default_model'] = _Ldm
+    return _Ldl
 
-def _build_export_payload(_Lq: list, _Lr: str='') -> dict:
-    _Ls = {'version': _EXPORT_VERSION, 'type': _EXPORT_TYPE, 'profiles': [_profile_to_export(_Lt) for _Lt in _Lq]}
-    _Lu = (_Lr or '').strip()
-    if _Lu and _Lu != '(не задана)':
-        _Ls['default_model'] = _Lu
-    return _Ls
-
-def _profile_from_export(_Lv: dict) -> dict:
-    if not isinstance(_Lv, dict):
+def _9(_Ldo: dict) -> dict:
+    if not isinstance(_Ldo, dict):
         raise ValueError('запись профиля не является объектом JSON')
-    _Lw = str(_Lv.get('id') or '').strip()
-    if not re.match('^[A-Za-z0-9._-]+$', _Lw or ''):
+    _Ldp = str(_Ldo.get('id') or '').strip()
+    if not re.match('^[A-Za-z0-9._-]+$', _Ldp or ''):
         raise ValueError('отсутствует корректный ID профиля')
-    _Lx = [str(_Ly) for _Ly in (_Lv.get('models') or []) if str(_Ly).strip()]
-    _Lz = [str(_La) for _La in (_Lv.get('known_models') or _Lx) if str(_La).strip()]
-    return {'id': _Lw, 'display_name': _Lv.get('display_name') or _Lw, 'coefficient': str(_Lv.get('coefficient') or ''), 'base_url': _Lv.get('base_url') or '', 'api_key': _Lv.get('api_key') or '', 'package': _Lv.get('package') or PACKAGES[0], 'models': _Lx, 'known_models': _Lz, 'extra_settings': _Lv.get('extra_settings') or {}, '_raw': _Lv.get('raw') or None}
+    _Ldq = [str(_Lds) for _Lds in _Ldo.get('models') or [] if str(_Lds).strip()]
+    _Ldr = [str(_Lds) for _Lds in _Ldo.get('known_models') or _Ldq if str(_Lds).strip()]
+    return {'id': _Ldp, 'display_name': _Ldo.get('display_name') or _Ldp, 'coefficient': str(_Ldo.get('coefficient') or ''), 'base_url': _Ldo.get('base_url') or '', 'api_key': _Ldo.get('api_key') or '', 'package': _Ldo.get('package') or PACKAGES[0], 'models': _Ldq, 'known_models': _Ldr, 'extra_settings': _Ldo.get('extra_settings') or {}, '_raw': _Ldo.get('raw') or None}
 
-def _profiles_from_export(data) -> tuple:
-    if isinstance(data, list):
-        _Lb, _Lc = (data, '')
-    elif isinstance(data, dict):
-        _Lc = str(data.get('default_model') or '').strip()
-        if isinstance(data.get('profiles'), list):
-            _Lb = data['profiles']
-        elif data.get('id'):
-            _Lb = [data]
+def _aa(_Ldt) -> tuple:
+    if isinstance(_Ldt, list):
+        _Ldy, _Ldz = (_Ldt, '')
+    elif isinstance(_Ldt, dict):
+        _Ldz = str(_Ldt.get('default_model') or '').strip()
+        if isinstance(_Ldt.get('profiles'), list):
+            _Ldy = _Ldt['profiles']
+        elif _Ldt.get('id'):
+            _Ldy = [_Ldt]
         else:
             raise ValueError('В файле нет профилей (ожидается ключ "profiles")')
     else:
         raise ValueError('Файл не содержит объект JSON')
-    _Ld = []
-    for _Le, _Lf in enumerate(_Lb, 1):
+    _Ldu = []
+    for _Ldv, _Ldw in enumerate(_Ldy, 1):
         try:
-            _Ld.append(_profile_from_export(_Lf))
-        except ValueError as _Lg:
-            raise ValueError('Профиль №%d: %s' % (_Le, _Lg))
-    if not _Ld:
+            _Ldu.append(_9(_Ldw))
+        except ValueError as _Ldx:
+            raise ValueError('Профиль №%d: %s' % (_Ldv, _Ldx))
+    if not _Ldu:
         raise ValueError('В файле нет ни одного профиля')
-    return (_Ld, _Lc)
+    return (_Ldu, _Ldz)
 
-class _5(tk.Toplevel):
+class _ab(tk.Toplevel):
 
     def __init__(self, app, profile):
         super().__init__(app.root)
@@ -620,7 +790,7 @@ class _5(tk.Toplevel):
         self.title('НОВЫЙ ПРОФИЛЬ' if self.is_new else 'ПРОФИЛЬ ' + str(profile['id']).upper())
         self.geometry('860x720')
         self.minsize(760, 470)
-        self.configure(bg=_b._T1)
+        self.configure(bg=_b.bg)
         self.transient(app.root)
         self.grab_set()
         self.var_id = tk.StringVar(master=self, value=(profile or {}).get('id', ''))
@@ -637,7 +807,7 @@ class _5(tk.Toplevel):
         self._build()
         if self._balance_value:
             try:
-                self.lbl_balance.configure(text=self._balance_value.get('text') or '—', fg=_b._T11)
+                self.lbl_balance.configure(text=self._balance_value.get('text') or '—', fg=_b.green)
                 self.lbl_balance_src.configure(text=(self._balance_value.get('url') or '') + '  •  из последнего запроса')
             except Exception:
                 pass
@@ -662,73 +832,74 @@ class _5(tk.Toplevel):
             pass
 
     def _field(self, parent, row, label, var, show=None):
-        tk.Label(parent, text=label, bg=_b._T1, fg=_b._T7, font=_b._T15, width=15, anchor='w').grid(row=row, column=0, sticky='w', padx=(4, 8), pady=4)
-        ent = ttk.Entry(parent, textvariable=var, font=_b._T14)
+        tk.Label(parent, text=label, bg=_b.bg, fg=_b.cyan_soft, font=_b.mono_small, width=15, anchor='w').grid(row=row, column=0, sticky='w', padx=(4, 8), pady=4)
+        ent = ttk.Entry(parent, textvariable=var, font=_b.mono)
         if show:
             ent.configure(show=show)
         ent.grid(row=row, column=1, sticky='ew', padx=6, pady=4)
         return ent
 
     def _build(self):
-        head = tk.Frame(self, bg=_b._T1)
+        head = tk.Frame(self, bg=_b.bg)
         head.pack(fill='x', padx=16, pady=(14, 2))
-        tk.Label(head, text='ПРОФИЛЬ ПРОВАЙДЕРА', bg=_b._T1, fg=_b._T6, font=_b._T16).pack(anchor='w')
-        _d(self, color=_b._T6).pack(fill='x', padx=16, pady=(4, 8))
-        form = tk.Frame(self, bg=_b._T1)
+        tk.Label(head, text='ПРОФИЛЬ ПРОВАЙДЕРА', bg=_b.bg, fg=_b.cyan, font=_b.mono_title).pack(anchor='w')
+        _f(self, color=_b.cyan).pack(fill='x', padx=16, pady=(4, 8))
+        form = tk.Frame(self, bg=_b.bg)
         form.pack(fill='x', padx=16)
         self.e_id = self._field(form, 0, 'ID ПРОВАЙДЕРА', self.var_id)
         self._field(form, 1, 'НАЗВАНИЕ', self.var_name)
         self._field(form, 2, 'URL ПРОВАЙДЕРА', self.var_url)
         self.e_key = self._field(form, 3, 'API KEY', self.var_key, show='•')
-        ttk.Button(form, text='ПОКАЗАТЬ', command=self._toggle_key).grid(row=3, column=2, padx=6)
-        tk.Label(form, text='ТРАНСПОРТ', bg=_b._T1, fg=_b._T7, font=_b._T15, width=15, anchor='w').grid(row=4, column=0, sticky='w', padx=(4, 8), pady=4)
-        ttk.Combobox(form, values=PACKAGES, textvariable=self.var_pkg, state='readonly', font=_b._T14, width=34).grid(row=4, column=1, sticky='w', padx=6, pady=4)
-        tk.Label(form, text='КОЭФФИЦИЕНТ', bg=_b._T1, fg=_b._T7, font=_b._T15, width=15, anchor='w').grid(row=5, column=0, sticky='w', padx=(4, 8), pady=4)
-        coef_row = tk.Frame(form, bg=_b._T1)
+        _e(form, text='ПОКАЗАТЬ', command=self._toggle_key).grid(row=3, column=2, padx=6)
+        tk.Label(form, text='ТРАНСПОРТ', bg=_b.bg, fg=_b.cyan_soft, font=_b.mono_small, width=15, anchor='w').grid(row=4, column=0, sticky='w', padx=(4, 8), pady=4)
+        ttk.Combobox(form, values=PACKAGES, textvariable=self.var_pkg, state='readonly', font=_b.mono, width=34).grid(row=4, column=1, sticky='w', padx=6, pady=4)
+        tk.Label(form, text='КОЭФФИЦИЕНТ', bg=_b.bg, fg=_b.cyan_soft, font=_b.mono_small, width=15, anchor='w').grid(row=5, column=0, sticky='w', padx=(4, 8), pady=4)
+        coef_row = tk.Frame(form, bg=_b.bg)
         coef_row.grid(row=5, column=1, sticky='w', padx=6, pady=4)
-        ttk.Entry(coef_row, textvariable=self.var_coef, font=_b._T14, width=10).pack(side='left')
-        tk.Label(coef_row, text='напр. 0.1 — множитель тарифа (лимит ÷ коэффициент = запас токенов)', bg=_b._T1, fg=_b._T13, font=_b._T15).pack(side='left', padx=8)
+        ttk.Entry(coef_row, textvariable=self.var_coef, font=_b.mono, width=10).pack(side='left')
+        tk.Label(coef_row, text='напр. 0.1 — множитель тарифа (лимит ÷ коэффициент = запас токенов)', bg=_b.bg, fg=_b.ink_dim, font=_b.mono_small).pack(side='left', padx=8)
         form.columnconfigure(1, weight=1)
-        row = tk.Frame(self, bg=_b._T1)
+        row = tk.Frame(self, bg=_b.bg)
         row.pack(fill='x', padx=16, pady=(10, 4))
-        self.btn_check = ttk.Button(row, text='ПОЛУЧИТЬ СПИСОК МОДЕЛЕЙ', style='Accent.TButton', command=self._check_key)
+        self.btn_check = _e(row, text='ПОЛУЧИТЬ СПИСОК МОДЕЛЕЙ', style='accent', command=self._check_key)
         self.btn_check.pack(side='left', padx=(4, 6), pady=4)
-        self.btn_balance = ttk.Button(row, text='ЗАПРОСИТЬ БАЛАНС', command=self._check_balance)
+        self.btn_balance = _e(row, text='ЗАПРОСИТЬ БАЛАНС', command=self._check_balance)
         self.btn_balance.pack(side='left', padx=(0, 10), pady=4)
-        self.lbl_status = tk.Label(row, text='ВВЕДИТЕ URL И КЛЮЧ, ЗАТЕМ ЗАПРОСИТЕ МОДЕЛИ', bg=_b._T1, fg=_b._T7, font=_b._T15)
+        self.lbl_status = tk.Label(row, text='ВВЕДИТЕ URL И КЛЮЧ, ЗАТЕМ ЗАПРОСИТЕ МОДЕЛИ', bg=_b.bg, fg=_b.cyan_soft, font=_b.mono_small)
         self.lbl_status.pack(side='left', padx=4)
-        bal_row = tk.Frame(self, bg=_b._T1)
+        bal_row = tk.Frame(self, bg=_b.bg)
         bal_row.pack(fill='x', padx=16, pady=(0, 4))
-        tk.Label(bal_row, text='БАЛАНС', bg=_b._T1, fg=_b._T13, font=_b._T15).pack(side='left', padx=(6, 10))
-        self.lbl_balance = tk.Label(bal_row, text='—', bg=_b._T1, fg=_b._T9, font=_b._T17 if hasattr(_b, 'mono_big') else _b._T16)
+        tk.Label(bal_row, text='БАЛАНС', bg=_b.bg, fg=_b.ink_dim, font=_b.mono_small).pack(side='left', padx=(6, 10))
+        self.lbl_balance = tk.Label(bal_row, text='—', bg=_b.bg, fg=_b.amber, font=_b.mono_big if hasattr(_b, 'mono_big') else _b.mono_title)
         self.lbl_balance.pack(side='left', padx=4)
-        self.lbl_balance_src = tk.Label(bal_row, text='', bg=_b._T1, fg=_b._T8, font=_b._T15)
+        self.lbl_balance_src = tk.Label(bal_row, text='', bg=_b.bg, fg=_b.cyan_dim, font=_b.mono_small)
         self.lbl_balance_src.pack(side='left', padx=10)
-        self.lbl_balance_est = tk.Label(self, text='', bg=_b._T1, fg=_b._T7, font=_b._T15, anchor='w')
+        self.lbl_balance_est = tk.Label(self, text='', bg=_b.bg, fg=_b.cyan_soft, font=_b.mono_small, anchor='w')
         self.lbl_balance_est.pack(fill='x', padx=18, pady=(0, 2))
-        _d(self, color=_b._T9).pack(fill='x', padx=16, pady=(6, 6))
-        mid = tk.Frame(self, bg=_b._T1)
+        _f(self, color=_b.amber).pack(fill='x', padx=16, pady=(6, 6))
+        mid = tk.Frame(self, bg=_b.bg)
         mid.pack(side='bottom', fill='both', expand=True, padx=16)
         mid.pack_propagate(False)
-        mhead = tk.Frame(mid, bg=_b._T1)
+        mhead = tk.Frame(mid, bg=_b.bg)
         mhead.pack(fill='x')
-        tk.Label(mhead, text='ДОСТУПНЫЕ МОДЕЛИ', bg=_b._T1, fg=_b._T6, font=_b._T16).pack(side='left', padx=2)
-        ttk.Button(mhead, text='☑ ВСЕ', width=8, style='Accent.TButton', command=lambda: self._set_all(True)).pack(side='right', padx=3)
-        ttk.Button(mhead, text='☐ НИЧЕГО', width=10, style='Accent.TButton', command=lambda: self._set_all(False)).pack(side='right', padx=3)
-        self.lbl_selected = tk.Label(mhead, text='ОТМЕЧЕНО: 0 / 0', bg=_b._T1, fg=_b._T9, font=_b._T15)
+        tk.Label(mhead, text='ДОСТУПНЫЕ МОДЕЛИ', bg=_b.bg, fg=_b.cyan, font=_b.mono_title).pack(side='left', padx=2)
+        _e(mhead, text='☑ ВСЕ', width=8, style='accent', command=lambda: self._set_all(True)).pack(side='right', padx=3)
+        _e(mhead, text='☐ НИЧЕГО', width=10, style='accent', command=lambda: self._set_all(False)).pack(side='right', padx=3)
+        self.lbl_selected = tk.Label(mhead, text='ОТМЕЧЕНО: 0 / 0', bg=_b.bg, fg=_b.amber, font=_b.mono_small)
         self.lbl_selected.pack(side='right', padx=10)
-        khint = tk.Frame(mid, bg=_b._T1)
+        khint = tk.Frame(mid, bg=_b.bg)
         khint.pack(fill='x', pady=(2, 0))
-        tk.Label(khint, text='SHIFT+КЛИК — ИНВЕРСИЯ   •   CTRL+КЛИК — ВКЛ/ВЫКЛ ВСЁ', bg=_b._T1, fg=_b._T7, font=_b._T15).pack(anchor='w', padx=2)
-        srow = tk.Frame(mid, bg=_b._T1)
+        tk.Label(khint, text='SHIFT+КЛИК — ИНВЕРСИЯ   •   CTRL+КЛИК — ВКЛ/ВЫКЛ ВСЁ', bg=_b.bg, fg=_b.cyan_soft, font=_b.mono_small).pack(anchor='w', padx=2)
+        srow = tk.Frame(mid, bg=_b.bg)
         srow.pack(fill='x', pady=(6, 4))
-        tk.Label(srow, text='ФИЛЬТР', bg=_b._T1, fg=_b._T13, font=_b._T15).pack(side='left', padx=(2, 8))
-        ttk.Entry(srow, textvariable=self.var_filter, font=_b._T14).pack(side='left', fill='x', expand=True, padx=(0, 4))
-        box = tk.Frame(mid, bg=_b._T1, highlightthickness=1, highlightbackground=_b._T5)
-        box.pack(side='bottom', fill='both', expand=True, pady=(0, 6))
-        self.canvas = tk.Canvas(box, bg=_b._T2, highlightthickness=0)
+        tk.Label(srow, text='ФИЛЬТР', bg=_b.bg, fg=_b.ink_dim, font=_b.mono_small).pack(side='left', padx=(2, 8))
+        ttk.Entry(srow, textvariable=self.var_filter, font=_b.mono).pack(side='left', fill='x', expand=True, padx=(0, 4))
+        box_panel = _d(mid, radius=16, fill=_b.bg_panel, outline=_b.cyan_dim, thickness=1, bg=_b.bg)
+        box_panel.pack(side='bottom', fill='both', expand=True, pady=(0, 6))
+        box = box_panel.inner
+        self.canvas = tk.Canvas(box, bg=_b.bg_panel, highlightthickness=0)
         sb = ttk.Scrollbar(box, orient='vertical', command=self.canvas.yview)
-        self.inner = tk.Frame(self.canvas, bg=_b._T2)
+        self.inner = tk.Frame(self.canvas, bg=_b.bg_panel)
         self.inner_id = self.canvas.create_window((0, 0), window=self.inner, anchor='nw')
         self.canvas.configure(yscrollcommand=sb.set)
         self.inner.bind('<Configure>', lambda e: self.canvas.configure(scrollregion=self.canvas.bbox('all')))
@@ -737,11 +908,11 @@ class _5(tk.Toplevel):
         sb.pack(side='right', fill='y')
         self.canvas.bind('<Enter>', self._bind_wheel)
         self.canvas.bind('<Leave>', self._unbind_wheel)
-        bottom = tk.Frame(self, bg=_b._T1)
+        bottom = tk.Frame(self, bg=_b.bg)
         bottom.pack(side='bottom', fill='x', padx=16, pady=(4, 14))
-        tk.Checkbutton(bottom, text='МОДЕЛЬ ПО УМОЛЧАНИЮ', variable=self.var_set_default, bg=_b._T1, fg=_b._T12, selectcolor=_b._T4, activebackground=_b._T1, activeforeground=_b._T6, font=_b._T15, bd=0).pack(side='left', padx=4)
-        ttk.Button(bottom, text='ОТМЕНА', command=self._cancel).pack(side='right', padx=4)
-        ttk.Button(bottom, text='СОХРАНИТЬ', style='Accent.TButton', command=self._save).pack(side='right', padx=4)
+        tk.Checkbutton(bottom, text='МОДЕЛЬ ПО УМОЛЧАНИЮ', variable=self.var_set_default, bg=_b.bg, fg=_b.ink, selectcolor=_b.bg_input, activebackground=_b.bg, activeforeground=_b.cyan, font=_b.mono_small, bd=0).pack(side='left', padx=4)
+        _e(bottom, text='ОТМЕНА', command=self._cancel).pack(side='right', padx=4)
+        _e(bottom, text='СОХРАНИТЬ', style='accent', command=self._save).pack(side='right', padx=4)
 
     def _bind_wheel(self, _=None):
         self.canvas.bind_all('<MouseWheel>', self._on_wheel)
@@ -806,7 +977,7 @@ class _5(tk.Toplevel):
             child.destroy()
         self._update_counter()
         if not self.models:
-            tk.Label(self.inner, text='МОДЕЛЕЙ ПОКА НЕТ — ПРОВЕРЬТЕ URL/КЛЮЧ', bg=_b._T2, fg=_b._T13, font=_b._T15).pack(anchor='w', padx=10, pady=10)
+            tk.Label(self.inner, text='МОДЕЛЕЙ ПОКА НЕТ — ПРОВЕРЬТЕ URL/КЛЮЧ', bg=_b.bg_panel, fg=_b.ink_dim, font=_b.mono_small).pack(anchor='w', padx=10, pady=10)
             return
         shown = 0
         for m in self.models:
@@ -821,11 +992,11 @@ class _5(tk.Toplevel):
             text = self._display_for(mid)
             if text != mid:
                 text = '%s   (%s)' % (text, mid)
-            cb = _8(self.inner, self, self.model_vars[mid], text)
+            cb = _ae(self.inner, self, self.model_vars[mid], text)
             cb.var = self.model_vars[mid]
             cb.pack(anchor='w', padx=8, pady=1, fill='x')
         if shown == 0:
-            tk.Label(self.inner, text='ПО ФИЛЬТРУ НИЧЕГО НЕ НАЙДЕНО', bg=_b._T2, fg=_b._T13, font=_b._T15).pack(anchor='w', padx=10, pady=10)
+            tk.Label(self.inner, text='ПО ФИЛЬТРУ НИЧЕГО НЕ НАЙДЕНО', bg=_b.bg_panel, fg=_b.ink_dim, font=_b.mono_small).pack(anchor='w', padx=10, pady=10)
 
     def _check_key(self):
         base, key = (self.var_url.get(), self.var_key.get())
@@ -837,9 +1008,9 @@ class _5(tk.Toplevel):
 
         def work():
             try:
-                self._results.put((_w(base, key), None))
-            except Exception as _Lhk:
-                self._results.put((None, _Lhk))
+                self._results.put((_y(base, key), None))
+            except Exception as _Lie:
+                self._results.put((None, _Lie))
         threading.Thread(target=work, daemon=True).start()
         self._poll_results()
 
@@ -879,14 +1050,14 @@ class _5(tk.Toplevel):
             messagebox.showwarning('Баланс', 'Сначала введите URL провайдера', parent=self)
             return
         self.btn_balance.configure(state='disabled')
-        self.lbl_balance.configure(text='…', fg=_b._T13)
+        self.lbl_balance.configure(text='…', fg=_b.ink_dim)
         self.lbl_balance_src.configure(text='запрашиваю')
 
         def work():
             try:
-                self._results.put(('balance', _t(base, key), None))
-            except Exception as _Lhl:
-                self._results.put(('balance', None, _Lhl))
+                self._results.put(('balance', _v(base, key), None))
+            except Exception as _Lif:
+                self._results.put(('balance', None, _Lif))
         threading.Thread(target=work, daemon=True).start()
         self._poll_results()
 
@@ -896,11 +1067,11 @@ class _5(tk.Toplevel):
         except Exception:
             pass
         if err is not None:
-            self.lbl_balance.configure(text='—', fg=_b._T10)
+            self.lbl_balance.configure(text='—', fg=_b.red)
             self.lbl_balance_src.configure(text=str(err)[:90])
             return
         text = data.get('text') or '—'
-        self.lbl_balance.configure(text=text, fg=_b._T11)
+        self.lbl_balance.configure(text=text, fg=_b.green)
         self.lbl_balance_src.configure(text=data.get('url') or '')
         self._balance_value = data
         self._update_estimate()
@@ -919,7 +1090,7 @@ class _5(tk.Toplevel):
             if units is None:
                 lbl.configure(text='')
                 return
-            est = _s(units, coef_txt)
+            est = _u(units, coef_txt)
             if not est:
                 lbl.configure(text='коэффициент должен быть > 0')
                 return
@@ -935,7 +1106,7 @@ class _5(tk.Toplevel):
         if not re.match('^[A-Za-z0-9._-]+$', pid):
             messagebox.showwarning('Проверка', 'ID может содержать только латиницу, цифры, «.», «_», «-»', parent=self)
             return
-        base = _q(self.var_url.get())
+        base = _s(self.var_url.get())
         if not base:
             messagebox.showwarning('Проверка', 'Укажите URL провайдера', parent=self)
             return
@@ -956,7 +1127,7 @@ class _5(tk.Toplevel):
         self.result = None
         self.destroy()
 
-class _6(tk.Toplevel):
+class _ac(tk.Toplevel):
 
     def __init__(self, app):
         super().__init__(app.root)
@@ -964,27 +1135,28 @@ class _6(tk.Toplevel):
         self.title('ИСТОРИЯ КОНФИГА И ОТКАТ')
         self.geometry('920x620')
         self.minsize(780, 430)
-        self.configure(bg=_b._T1)
+        self.configure(bg=_b.bg)
         self.transient(app.root)
         self.grab_set()
-        head = tk.Frame(self, bg=_b._T1)
+        head = tk.Frame(self, bg=_b.bg)
         head.pack(fill='x', padx=16, pady=(14, 2))
-        tk.Label(head, text='ИСТОРИЯ ВЕРСИЙ', bg=_b._T1, fg=_b._T6, font=_b._T16).pack(side='left', padx=2)
-        ttk.Button(head, text='СНИМОК СЕЙЧАС', command=self.make_now).pack(side='right', padx=4)
-        ttk.Button(head, text='ОБНОВИТЬ', command=self.reload).pack(side='right', padx=4)
-        _d(self, color=_b._T6).pack(fill='x', padx=16, pady=(4, 8))
-        foot = tk.Frame(self, bg=_b._T1)
+        tk.Label(head, text='ИСТОРИЯ ВЕРСИЙ', bg=_b.bg, fg=_b.cyan, font=_b.mono_title).pack(side='left', padx=2)
+        _e(head, text='СНИМОК СЕЙЧАС', command=self.make_now).pack(side='right', padx=4)
+        _e(head, text='ОБНОВИТЬ', command=self.reload).pack(side='right', padx=4)
+        _f(self, color=_b.cyan).pack(fill='x', padx=16, pady=(4, 8))
+        foot = tk.Frame(self, bg=_b.bg)
         foot.pack(side='bottom', fill='x', padx=16, pady=(4, 14))
-        tk.Label(foot, text='ОТКАТ ВОССТАНАВЛИВАЕТ ФАЙЛ ЦЕЛИКОМ', bg=_b._T1, fg=_b._T13, font=_b._T15).pack(side='left', padx=4)
-        ttk.Button(foot, text='ЗАКРЫТЬ', command=self.destroy).pack(side='right', padx=4)
-        ttk.Button(foot, text='ВОССТАНОВИТЬ ВЫБРАННОЕ', style='Accent.TButton', command=self.restore_selected).pack(side='right', padx=4)
-        prev = tk.Frame(self, bg=_b._T1)
+        tk.Label(foot, text='ОТКАТ ВОССТАНАВЛИВАЕТ ФАЙЛ ЦЕЛИКОМ', bg=_b.bg, fg=_b.ink_dim, font=_b.mono_small).pack(side='left', padx=4)
+        _e(foot, text='ЗАКРЫТЬ', command=self.destroy).pack(side='right', padx=4)
+        _e(foot, text='ВОССТАНОВИТЬ ВЫБРАННОЕ', style='accent', command=self.restore_selected).pack(side='right', padx=4)
+        prev = tk.Frame(self, bg=_b.bg)
         prev.pack(side='bottom', fill='x', padx=16, pady=(8, 4))
-        tk.Label(prev, text='СОДЕРЖИМОЕ СНИМКА', bg=_b._T1, fg=_b._T13, font=_b._T15).pack(anchor='w')
-        self.preview_box = tk.Text(prev, height=7, bg=_b._T4, fg=_b._T12, relief='flat', font=_b._T15, insertbackground=_b._T6, wrap='none', highlightthickness=1, highlightbackground=_b._T5)
+        tk.Label(prev, text='СОДЕРЖИМОЕ СНИМКА', bg=_b.bg, fg=_b.ink_dim, font=_b.mono_small).pack(anchor='w')
+        self.preview_box = tk.Text(prev, height=7, bg=_b.bg_input, fg=_b.ink, relief='flat', font=_b.mono_small, insertbackground=_b.cyan, wrap='none', highlightthickness=1, highlightbackground=_b.line)
         self.preview_box.pack(fill='both', expand=True, pady=4)
-        mid = tk.Frame(self, bg=_b._T1, highlightthickness=1, highlightbackground=_b._T5)
-        mid.pack(fill='both', expand=True, padx=16)
+        mid_panel = _d(self, radius=18, fill=_b.bg_panel, outline=_b.cyan_dim, thickness=1, bg=_b.bg)
+        mid_panel.pack(fill='both', expand=True, padx=16)
+        mid = mid_panel.inner
         cols = ('time', 'name', 'providers', 'model')
         self.tree = ttk.Treeview(mid, columns=cols, show='headings', selectmode='browse')
         for col, title, width in (('time', 'КОГДА', 150), ('name', 'ФАЙЛ', 250), ('providers', 'ПРОВАЙДЕРЫ', 240), ('model', 'МОДЕЛЬ', 190)):
@@ -1004,7 +1176,7 @@ class _6(tk.Toplevel):
         self.reload()
 
     def reload(self):
-        self.items = _l(self.app.config_path)
+        self.items = _n(self.app.config_path)
         self.tree.delete(*self.tree.get_children())
         for i, e in enumerate(self.items):
             when = e['time'].strftime('%d.%m.%Y %H:%M:%S') if e.get('time') else '?'
@@ -1058,18 +1230,18 @@ class _6(tk.Toplevel):
         self.app.quick_restore(entry)
         self.reload()
 
-class _7:
+class _ad:
     pass
 
-class _8(tk.Checkbutton):
+class _ae(tk.Checkbutton):
 
     def __init__(self, master, owner, variable, text, **kw):
-        kw.setdefault('bg', _b._T2)
-        kw.setdefault('fg', _b._T12)
-        kw.setdefault('selectcolor', _b._T4)
-        kw.setdefault('activebackground', _b._T2)
-        kw.setdefault('activeforeground', _b._T6)
-        kw.setdefault('font', _b._T15)
+        kw.setdefault('bg', _b.bg_panel)
+        kw.setdefault('fg', _b.ink)
+        kw.setdefault('selectcolor', _b.bg_input)
+        kw.setdefault('activebackground', _b.bg_panel)
+        kw.setdefault('activeforeground', _b.cyan)
+        kw.setdefault('font', _b.mono_small)
         kw.setdefault('anchor', 'w')
         kw.setdefault('bd', 0)
         kw.setdefault('highlightthickness', 0)
@@ -1100,55 +1272,54 @@ class _8(tk.Checkbutton):
                 pass
             return 'break'
         return None
+VK_INSERT = 45
+VK_A = 65
+VK_C = 67
+VK_V = 86
+VK_X = 88
+CONTROL_STATE = 4
+SHORTCUT_EVENTS = {'paste': '<<Paste>>', 'copy': '<<Copy>>', 'cut': '<<Cut>>', 'select_all': '<<SelectAll>>'}
+CONTROL_KEYCODES = {'paste': (VK_V,), 'copy': (VK_C, VK_INSERT), 'cut': (VK_X,), 'select_all': (VK_A,)}
+LATIN_SHORTCUT_KEYSYMS = {'paste': ('v', 'V'), 'copy': ('c', 'C'), 'cut': ('x', 'X'), 'select_all': ('a', 'A')}
+INPUT_CLASSES = ('TEntry', 'TCombobox', 'TSpinbox', 'Entry', 'Spinbox', 'Text')
 
-_VK_INSERT = 45
-_VK_A = 65
-_VK_C = 67
-_VK_V = 86
-_VK_X = 88
-_CTRL = 0x0004
-_SHORTCUT_EVENTS = {'paste': '<<Paste>>', 'copy': '<<Copy>>', 'cut': '<<Cut>>', 'select_all': '<<SelectAll>>'}
-_CONTROL_KEYS = {'paste': (_VK_V,), 'copy': (_VK_C, _VK_INSERT), 'cut': (_VK_X,), 'select_all': (_VK_A,)}
-_LATIN_KEYS = {'paste': ('v', 'V'), 'copy': ('c', 'C'), 'cut': ('x', 'X'), 'select_all': ('a', 'A')}
-_INPUT_CLASSES = ('TEntry', 'TCombobox', 'TSpinbox', 'Entry', 'Spinbox', 'Text')
-
-def _input_widget(_M0):
+def _af(_Ld0):
     try:
-        return _M0.winfo_class() in _INPUT_CLASSES
+        return _Ld0.winfo_class() in INPUT_CLASSES
     except Exception:
         return False
 
-def _int_attr(_M1, _M2):
+def _ag(_Ld1, _Ld2):
     try:
-        return int(getattr(_M1, _M2, 0) or 0)
+        return int(getattr(_Ld1, _Ld2, 0) or 0)
     except Exception:
         return 0
 
-def _state_of(_M3):
-    return _int_attr(_M3, 'state')
+def _ah(_Ld3):
+    return _ag(_Ld3, 'state')
 
-def _keycode_of(_M4):
-    return _int_attr(_M4, 'keycode')
+def _ai(_Ld4):
+    return _ag(_Ld4, 'keycode')
 
-def _keysym_of(_M5):
-    return str(getattr(_M5, 'keysym', '') or '')
+def _aj(_Ld5):
+    return str(getattr(_Ld5, 'keysym', '') or '')
 
-def _shortcut_action(_M6):
-    if _M6 is None:
+def _ak(_Ld6):
+    if _Ld6 is None:
         return None
-    if not _state_of(_M6) & _CTRL:
+    if not _ah(_Ld6) & CONTROL_STATE:
         return None
-    _M7 = _keycode_of(_M6)
-    for _M8, _M9 in _CONTROL_KEYS.items():
-        if _M7 in _M9:
-            return _M8
+    _Ld7 = _ai(_Ld6)
+    for _Ld8, _Ld9 in CONTROL_KEYCODES.items():
+        if _Ld7 in _Ld9:
+            return _Ld8
     return None
 
-class _9:
+class _al:
 
-    def __init__(self, _Ldz):
-        self.root = _Ldz
-        self.menu = tk.Menu(_Ldz, tearoff=0, bg=_b._T3, fg=_b._T12, activebackground='#0b3547', activeforeground=_b._T6, font=_b._T15, bd=0, relief='flat')
+    def __init__(self, _Leu):
+        self.root = _Leu
+        self.menu = tk.Menu(_Leu, tearoff=0, bg=_b.bg_panel_hi, fg=_b.ink, activebackground='#0b3547', activeforeground=_b.cyan, font=_b.mono_small, bd=0, relief='flat')
         self.menu.add_command(label='ВЫРЕЗАТЬ        Ctrl+X', command=self._cut)
         self.menu.add_command(label='КОПИРОВАТЬ      Ctrl+C', command=self._copy)
         self.menu.add_command(label='ВСТАВИТЬ        Ctrl+V', command=self._paste)
@@ -1157,103 +1328,103 @@ class _9:
         self._target = None
         self.menu.bind('<FocusOut>', lambda e: self.menu.unpost())
 
-    def _widget(self, _Ld0):
-        _Ld1 = _Ld0.widget
-        return _Ld1 if _input_widget(_Ld1) else None
+    def _widget(self, _Lev):
+        _Lew = _Lev.widget
+        return _Lew if _af(_Lew) else None
 
-    def bind(self, _Ld2):
-        _Ld2.bind('<Button-3>', self.popup, add='+')
-        return _Ld2
+    def bind(self, _Lex):
+        _Lex.bind('<Button-3>', self.popup, add='+')
+        return _Lex
 
-    def bind_tree(self, _Ld3):
-        self.bind(_Ld3)
-        if _input_widget(_Ld3):
-            _Ld3.bind('<Control-KeyPress>', self.on_control_key, add='+')
-        for _Ld4 in _Ld3.winfo_children():
-            self.bind_tree(_Ld4)
+    def bind_tree(self, _Ley):
+        self.bind(_Ley)
+        if _af(_Ley):
+            _Ley.bind('<Control-KeyPress>', self.on_control_key, add='+')
+        for _Lez in _Ley.winfo_children():
+            self.bind_tree(_Lez)
 
-    def _target_for(self, _Ma=None):
-        _Mb = getattr(_Ma, 'widget', None) if _Ma is not None else None
-        if _input_widget(_Mb):
-            return _Mb
+    def _target_for(self, _Le0=None):
+        _Le1 = getattr(_Le0, 'widget', None) if _Le0 is not None else None
+        if _af(_Le1):
+            return _Le1
         try:
-            _Mb = self.root.focus_get()
+            _Le1 = self.root.focus_get()
         except Exception:
-            _Mb = None
-        return _Mb if _input_widget(_Mb) else None
+            _Le1 = None
+        return _Le1 if _af(_Le1) else None
 
-    def _run_shortcut(self, _Mc, _Md):
-        _Me = _SHORTCUT_EVENTS[_Md]
-        if _Mc is None:
+    def _run_shortcut(self, _Le2, _Le3):
+        _Le4 = SHORTCUT_EVENTS[_Le3]
+        if _Le2 is None:
             return None
         try:
-            _Mc.event_generate(_Me)
+            _Le2.event_generate(_Le4)
         except Exception:
             return None
         return 'break'
 
-    def on_control_key(self, _Mf):
-        _Mg = _shortcut_action(_Mf)
-        if _Mg is None:
+    def on_control_key(self, _Le5):
+        _Le6 = _ak(_Le5)
+        if _Le6 is None:
             return None
-        if _keysym_of(_Mf) in _LATIN_KEYS[_Mg]:
+        if _aj(_Le5) in LATIN_SHORTCUT_KEYSYMS[_Le6]:
             return None
-        return self._run_shortcut(self._target_for(_Mf), _Mg)
+        return self._run_shortcut(self._target_for(_Le5), _Le6)
 
-    def _cls(self, _Ld5):
+    def _cls(self, _Le7):
         try:
-            return _Ld5.winfo_class()
+            return _Le7.winfo_class()
         except Exception:
             return ''
 
     def _copy(self):
-        _Ld7 = self._target
-        if not _Ld7:
+        _Le8 = self._target
+        if not _Le8:
             return
         try:
-            if self._cls(_Ld7) == 'Text':
-                _Ld6 = _Ld7.get('sel.first', 'sel.last') if _Ld7.tag_ranges('sel') else _Ld7.get('1.0', 'end-1c')
+            if self._cls(_Le8) == 'Text':
+                _Le9 = _Le8.get('sel.first', 'sel.last') if _Le8.tag_ranges('sel') else _Le8.get('1.0', 'end-1c')
             else:
-                _Ld6 = _Ld7.selection_get()
+                _Le9 = _Le8.selection_get()
         except Exception:
-            _Ld6 = ''
-        if _Ld6:
+            _Le9 = ''
+        if _Le9:
             self.root.clipboard_clear()
-            self.root.clipboard_append(_Ld6)
+            self.root.clipboard_append(_Le9)
 
     def _cut(self):
-        _Ld8 = self._target
-        if not _Ld8:
+        _Lfa = self._target
+        if not _Lfa:
             return
         self._copy()
         try:
-            if self._cls(_Ld8) == 'Text':
-                if _Ld8.tag_ranges('sel'):
-                    _Ld8.delete('sel.first', 'sel.last')
+            if self._cls(_Lfa) == 'Text':
+                if _Lfa.tag_ranges('sel'):
+                    _Lfa.delete('sel.first', 'sel.last')
             else:
-                _Ld8.delete('sel.first', 'sel.last')
+                _Lfa.delete('sel.first', 'sel.last')
         except Exception:
             pass
 
     def _paste(self):
-        _Lea = self._target
-        if not _Lea:
+        _Lfb = self._target
+        if not _Lfb:
             return
-        _Ld9 = self._read_clip()
-        if not _Ld9:
+        _Lfc = self._read_clip()
+        if not _Lfc:
             return
-        self._insert_text(_Lea, _Ld9)
+        self._insert_text(_Lfb, _Lfc)
 
     def _select_all(self):
-        _Leb = self._target
-        if not _Leb:
+        _Lfd = self._target
+        if not _Lfd:
             return
         try:
-            if self._cls(_Leb) == 'Text':
-                _Leb.tag_add('sel', '1.0', 'end-1c')
+            if self._cls(_Lfd) == 'Text':
+                _Lfd.tag_add('sel', '1.0', 'end-1c')
             else:
-                _Leb.selection_range(0, 'end')
-                _Leb.icursor('end')
+                _Lfd.selection_range(0, 'end')
+                _Lfd.icursor('end')
         except Exception:
             pass
 
@@ -1263,46 +1434,46 @@ class _9:
         except Exception:
             return ''
 
-    def _insert_text(self, _Leg, _Leh):
+    def _insert_text(self, _Lfe, _Lff):
         try:
-            if str(_Leg.cget('state')) == 'readonly':
+            if str(_Lfe.cget('state')) == 'readonly':
                 return
         except Exception:
             pass
         try:
             try:
-                _Leg.delete('sel.first', 'sel.last')
+                _Lfe.delete('sel.first', 'sel.last')
             except Exception:
                 pass
-            _Leg.insert('insert', _Leh)
+            _Lfe.insert('insert', _Lff)
         except Exception:
             pass
 
-    def popup(self, _Lei):
-        _Lej = self._widget(_Lei)
-        if _Lej is None:
+    def popup(self, _Lfg):
+        _Lfh = self._widget(_Lfg)
+        if _Lfh is None:
             return 'break'
-        self._target = _Lej
+        self._target = _Lfh
         try:
-            self.menu.tk_popup(_Lei.x_root, _Lei.y_root)
+            self.menu.tk_popup(_Lfg.x_root, _Lfg.y_root)
         finally:
             self.menu.grab_release()
         return 'break'
 
-def _ab(root):
-    menu = _9(root)
-    for _Mh in _INPUT_CLASSES:
+def _am(_Lea):
+    _Leb = _al(_Lea)
+    for _Lec in INPUT_CLASSES:
         try:
-            root.bind_class(_Mh, '<Control-KeyPress>', menu.on_control_key, add='+')
+            _Lea.bind_class(_Lec, '<Control-KeyPress>', _Leb.on_control_key, add='+')
         except Exception:
             pass
-    return menu
+    return _Leb
 
 class App:
 
     def __init__(self):
         self.root_ready = True
-        self.config_path = _h()
+        self.config_path = _j()
         self.config = {}
         self.profiles = []
         self.selected = None
@@ -1318,9 +1489,9 @@ class App:
         self.root.title(APP_TITLE)
         self.root.geometry('1160x780')
         self.root.minsize(960, 640)
-        self.root.configure(bg=_b._T1)
+        self.root.configure(bg=_b.bg)
         _c(self.root)
-        self.clipboard = _ab(self.root)
+        self.clipboard = _am(self.root)
         self._build()
         try:
             self.clipboard.bind_tree(self.root)
@@ -1330,143 +1501,144 @@ class App:
         self.root.bind('<Control-Z>', lambda e: self.undo_last())
 
     def _build(self):
-        _Lfj = self.root
-        _Lfi = tk.Frame(_Lfj, bg=_b._T1)
-        _Lfi.pack(fill='x', padx=16, pady=(14, 4))
-        _Lfh = tk.Frame(_Lfi, bg=_b._T1)
-        _Lfh.pack(side='left', padx=(2, 20))
-        tk.Label(_Lfh, text='OPENCODE', bg=_b._T1, fg=_b._T6, font=_b._T17).pack(anchor='w')
-        tk.Label(_Lfh, text='ПРОВАЙДЕРЫ И МОДЕЛИ', bg=_b._T1, fg=_b._T13, font=_b._T15).pack(anchor='w')
-        _Lfg = tk.Frame(_Lfi, bg=_b._T1)
-        _Lfg.pack(side='left', fill='x', expand=True, padx=8)
-        tk.Label(_Lfg, text='КОНФИГУРАЦИЯ', bg=_b._T1, fg=_b._T13, font=_b._T15).pack(anchor='w')
+        _Lfi = self.root
+        _Lfj = tk.Frame(_Lfi, bg=_b.bg)
+        _Lfj.pack(fill='x', padx=16, pady=(14, 4))
+        _Lfk = tk.Frame(_Lfj, bg=_b.bg)
+        _Lfk.pack(side='left', padx=(2, 20))
+        tk.Label(_Lfk, text='OPENCODE', bg=_b.bg, fg=_b.cyan, font=_b.mono_big).pack(anchor='w')
+        tk.Label(_Lfk, text='ПРОВАЙДЕРЫ И МОДЕЛИ', bg=_b.bg, fg=_b.ink_dim, font=_b.mono_small).pack(anchor='w')
+        _Lfl = tk.Frame(_Lfj, bg=_b.bg)
+        _Lfl.pack(side='left', fill='x', expand=True, padx=8)
+        tk.Label(_Lfl, text='КОНФИГУРАЦИЯ', bg=_b.bg, fg=_b.ink_dim, font=_b.mono_small).pack(anchor='w')
         self.var_path = tk.StringVar(value=str(self.config_path))
-        ttk.Entry(_Lfg, textvariable=self.var_path, font=_b._T14).pack(fill='x', pady=(2, 0))
-        _Lff = tk.Frame(_Lfi, bg=_b._T1)
-        _Lff.pack(side='right', padx=(8, 2))
-        ttk.Button(_Lff, text='ОТКРЫТЬ ПАПКУ', command=self._open_folder).pack(side='left', padx=3)
-        ttk.Button(_Lff, text='ПЕРЕЗАГРУЗИТЬ', command=self.load).pack(side='left', padx=3)
-        _d(_Lfj, color=_b._T6).pack(fill='x', padx=16, pady=(6, 0))
-        _Lfe = tk.Frame(_Lfj, bg=_b._T1)
-        _Lfe.pack(fill='both', expand=True, padx=16, pady=8)
-        _Lfd = tk.Frame(_Lfe, bg=_b._T1, width=430, highlightthickness=1, highlightbackground=_b._T5)
-        _Lfd.pack(side='left', fill='y', padx=(0, 10))
-        _Lfd.pack_propagate(False)
-        _Lfc = tk.Frame(_Lfd, bg=_b._T2)
-        _Lfc.pack(fill='x', padx=10, pady=(10, 6))
-        tk.Label(_Lfc, text='ПРОФИЛИ', bg=_b._T2, fg=_b._T6, font=_b._T16).pack(side='left')
-        self.lbl_count = tk.Label(_Lfc, text='0', bg=_b._T2, fg=_b._T13, font=_b._T15)
+        ttk.Entry(_Lfl, textvariable=self.var_path, font=_b.mono).pack(fill='x', pady=(2, 0))
+        _Lfm = tk.Frame(_Lfj, bg=_b.bg)
+        _Lfm.pack(side='right', padx=(8, 2))
+        _e(_Lfm, text='ОТКРЫТЬ ПАПКУ', command=self._open_folder).pack(side='left', padx=3)
+        _e(_Lfm, text='ПЕРЕЗАГРУЗИТЬ', command=self.load).pack(side='left', padx=3)
+        _f(_Lfi, color=_b.cyan).pack(fill='x', padx=16, pady=(6, 0))
+        _Lfn = tk.Frame(_Lfi, bg=_b.bg)
+        _Lfn.pack(fill='both', expand=True, padx=16, pady=8)
+        _Lfo = _d(_Lfn, width=430, radius=20, fill=_b.panel_fill, outline=_b.panel_edge, thickness=1, bg=_b.bg)
+        _Lfo.pack(side='left', fill='y', padx=(0, 10))
+        _Lfp = _Lfo.inner
+        _Lfq = tk.Frame(_Lfp, bg=_b.bg_panel)
+        _Lfq.pack(fill='x', padx=10, pady=(10, 6))
+        tk.Label(_Lfq, text='ПРОФИЛИ', bg=_b.bg_panel, fg=_b.cyan, font=_b.mono_title).pack(side='left')
+        self.lbl_count = tk.Label(_Lfq, text='0', bg=_b.bg_panel, fg=_b.ink_dim, font=_b.mono_small)
         self.lbl_count.pack(side='right')
-        _Lfb = tk.Frame(_Lfd, bg=_b._T2)
-        _Lfb.pack(fill='both', expand=True, padx=8, pady=4)
-        self.tree = ttk.Treeview(_Lfb, columns=('name', 'url'), show='headings', selectmode='browse')
+        _Lfr = tk.Frame(_Lfp, bg=_b.bg_panel)
+        _Lfr.pack(fill='both', expand=True, padx=8, pady=4)
+        self.tree = ttk.Treeview(_Lfr, columns=('name', 'url'), show='headings', selectmode='browse')
         self.tree.heading('name', text='ПРОФИЛЬ')
         self.tree.heading('url', text='URL')
         self.tree.column('name', width=150, anchor='w')
         self.tree.column('url', width=245, anchor='w')
-        _Lfa = ttk.Scrollbar(_Lfb, orient='vertical', command=self.tree.yview)
-        self.tree.configure(yscrollcommand=_Lfa.set)
+        _Lfs = ttk.Scrollbar(_Lfr, orient='vertical', command=self.tree.yview)
+        self.tree.configure(yscrollcommand=_Lfs.set)
         self.tree.pack(side='left', fill='both', expand=True)
-        _Lfa.pack(side='right', fill='y')
+        _Lfs.pack(side='right', fill='y')
         self.tree.bind('<<TreeviewSelect>>', lambda e: self._on_select())
         self.tree.bind('<Double-1>', lambda e: self.edit_profile())
-        _Le9 = tk.Frame(_Lfd, bg=_b._T2)
-        _Le9.pack(fill='x', padx=8, pady=(6, 10))
-        ttk.Button(_Le9, text='+ ДОБАВИТЬ', style='Accent.TButton', command=self.add_profile).pack(side='left', padx=(2, 3), pady=4)
-        ttk.Button(_Le9, text='ИЗМЕНИТЬ', command=self.edit_profile).pack(side='left', padx=3)
-        ttk.Button(_Le9, text='УДАЛИТЬ', style='Danger.TButton', command=self.delete_profile).pack(side='left', padx=3)
-        _Le8 = tk.Frame(_Lfe, bg=_b._T1, highlightthickness=1, highlightbackground=_b._T5)
-        _Le8.pack(side='left', fill='both', expand=True)
-        _Le7 = tk.Frame(_Le8, bg=_b._T2)
-        _Le7.pack(fill='x', padx=12, pady=(10, 2))
-        tk.Label(_Le7, text='ПРОФИЛЬ', bg=_b._T2, fg=_b._T13, font=_b._T15).pack(anchor='w')
-        self.lbl_title = tk.Label(_Le7, text='— НЕ ВЫБРАН —', bg=_b._T2, fg=_b._T6, font=_b._T17)
+        _Lft = tk.Frame(_Lfp, bg=_b.bg_panel)
+        _Lft.pack(fill='x', padx=8, pady=(6, 10))
+        _e(_Lft, text='+ ДОБАВИТЬ', style='accent', command=self.add_profile).pack(side='left', padx=(2, 3), pady=4)
+        _e(_Lft, text='ИЗМЕНИТЬ', command=self.edit_profile).pack(side='left', padx=3)
+        _e(_Lft, text='УДАЛИТЬ', style='danger', command=self.delete_profile).pack(side='left', padx=3)
+        _Lfu = _d(_Lfn, radius=20, fill=_b.panel_fill, outline=_b.panel_edge, thickness=1, bg=_b.bg)
+        _Lfu.pack(side='left', fill='both', expand=True)
+        _Lfv = _Lfu.inner
+        _Lfw = tk.Frame(_Lfv, bg=_b.bg_panel)
+        _Lfw.pack(fill='x', padx=12, pady=(10, 2))
+        tk.Label(_Lfw, text='ПРОФИЛЬ', bg=_b.bg_panel, fg=_b.ink_dim, font=_b.mono_small).pack(anchor='w')
+        self.lbl_title = tk.Label(_Lfw, text='— НЕ ВЫБРАН —', bg=_b.bg_panel, fg=_b.cyan, font=_b.mono_big)
         self.lbl_title.pack(anchor='w', pady=(2, 0))
-        _Le6 = tk.Frame(_Le8, bg=_b._T2)
-        _Le6.pack(fill='x', padx=10, pady=(8, 4))
+        _Lfx = tk.Frame(_Lfv, bg=_b.bg_panel)
+        _Lfx.pack(fill='x', padx=10, pady=(8, 4))
         self.detail_vars = {}
-        for _Le2, (_Le4, _Le5) in enumerate([('ID', 'id'), ('НАЗВАНИЕ', 'display_name'), ('URL', 'base_url'), ('API KEY', 'api_key'), ('ТРАНСПОРТ', 'package')]):
-            tk.Label(_Le6, text=_Le4, bg=_b._T2, fg=_b._T13, font=_b._T15, width=11, anchor='w').grid(row=_Le2, column=0, sticky='w', padx=(6, 8), pady=3)
-            _Le3 = tk.StringVar()
-            self.detail_vars[_Le5] = _Le3
-            _Lew = ttk.Entry(_Le6, textvariable=_Le3, font=_b._T14)
-            _Lew.grid(row=_Le2, column=1, sticky='ew', padx=6, pady=3)
-            _Lew.configure(state='readonly')
-            if _Le5 == 'api_key':
-                _Lew.configure(show='•')
-                ttk.Button(_Le6, text='ПОКАЗАТЬ', command=lambda e=_Lew: self._toggle_entry(e)).grid(row=_Le2, column=2, padx=6)
-        _Le6.columnconfigure(1, weight=1)
-        _Le1 = tk.Frame(_Le8, bg=_b._T2)
-        _Le1.pack(fill='x', padx=12, pady=(10, 0))
-        tk.Label(_Le1, text='БАЛАНС', bg=_b._T2, fg=_b._T13, font=_b._T15).pack(side='left')
-        self.lbl_balance_main = tk.Label(_Le1, text='—', bg=_b._T2, fg=_b._T13, font=_b._T14)
+        for _Lf6, (_Lf8, _Lf9) in enumerate([('ID', 'id'), ('НАЗВАНИЕ', 'display_name'), ('URL', 'base_url'), ('API KEY', 'api_key'), ('ТРАНСПОРТ', 'package')]):
+            tk.Label(_Lfx, text=_Lf8, bg=_b.bg_panel, fg=_b.ink_dim, font=_b.mono_small, width=11, anchor='w').grid(row=_Lf6, column=0, sticky='w', padx=(6, 8), pady=3)
+            _Lf7 = tk.StringVar()
+            self.detail_vars[_Lf9] = _Lf7
+            _Lf3 = ttk.Entry(_Lfx, textvariable=_Lf7, font=_b.mono)
+            _Lf3.grid(row=_Lf6, column=1, sticky='ew', padx=6, pady=3)
+            _Lf3.configure(state='readonly')
+            if _Lf9 == 'api_key':
+                _Lf3.configure(show='•')
+                _e(_Lfx, text='ПОКАЗАТЬ', command=lambda e=_Lf3: self._toggle_entry(e)).grid(row=_Lf6, column=2, padx=6)
+        _Lfx.columnconfigure(1, weight=1)
+        _Lfy = tk.Frame(_Lfv, bg=_b.bg_panel)
+        _Lfy.pack(fill='x', padx=12, pady=(10, 0))
+        tk.Label(_Lfy, text='БАЛАНС', bg=_b.bg_panel, fg=_b.ink_dim, font=_b.mono_small).pack(side='left')
+        self.lbl_balance_main = tk.Label(_Lfy, text='—', bg=_b.bg_panel, fg=_b.ink_dim, font=_b.mono)
         self.lbl_balance_main.pack(side='left', padx=(10, 8))
-        self.btn_balance_main = ttk.Button(_Le1, text='ОБНОВИТЬ', command=self.request_balance)
+        self.btn_balance_main = _e(_Lfy, text='ОБНОВИТЬ', command=self.request_balance)
         self.btn_balance_main.pack(side='right', padx=2)
-        self.lbl_balance_when = tk.Label(_Le1, text='', bg=_b._T2, fg=_b._T8, font=_b._T15)
+        self.lbl_balance_when = tk.Label(_Lfy, text='', bg=_b.bg_panel, fg=_b.cyan_dim, font=_b.mono_small)
         self.lbl_balance_when.pack(side='right', padx=8)
-        self.lbl_balance_est_main = tk.Label(_Le8, text='', bg=_b._T2, fg=_b._T7, font=_b._T15, anchor='w')
+        self.lbl_balance_est_main = tk.Label(_Lfv, text='', bg=_b.bg_panel, fg=_b.cyan_soft, font=_b.mono_small, anchor='w')
         self.lbl_balance_est_main.pack(fill='x', padx=18, pady=(1, 0))
-        _Le0 = tk.Frame(_Le8, bg=_b._T2)
-        _Le0.pack(fill='x', padx=12, pady=(10, 2))
-        tk.Label(_Le0, text='МОДЕЛИ ПРОФИЛЯ', bg=_b._T2, fg=_b._T13, font=_b._T15).pack(side='left')
-        self.lbl_models_count = tk.Label(_Le0, text='', bg=_b._T2, fg=_b._T9, font=_b._T15)
+        _Lfz = tk.Frame(_Lfv, bg=_b.bg_panel)
+        _Lfz.pack(fill='x', padx=12, pady=(10, 2))
+        tk.Label(_Lfz, text='МОДЕЛИ ПРОФИЛЯ', bg=_b.bg_panel, fg=_b.ink_dim, font=_b.mono_small).pack(side='left')
+        self.lbl_models_count = tk.Label(_Lfz, text='', bg=_b.bg_panel, fg=_b.amber, font=_b.mono_small)
         self.lbl_models_count.pack(side='right')
-        self.lst_models = tk.Listbox(_Le8, height=4, bg=_b._T4, fg=_b._T7, selectbackground='#0b3547', selectforeground=_b._T6, relief='flat', font=_b._T15, highlightthickness=1, highlightbackground=_b._T5)
+        self.lst_models = tk.Listbox(_Lfv, height=4, bg=_b.bg_input, fg=_b.cyan_soft, selectbackground='#0b3547', selectforeground=_b.cyan, relief='flat', font=_b.mono_small, highlightthickness=1, highlightbackground=_b.line)
         self.lst_models.pack(fill='both', expand=True, padx=12, pady=(0, 8))
         self.lst_models.bind('<Double-1>', lambda e: self.make_default())
         self.lst_models.bind('<Return>', lambda e: self.make_default())
-        _Lez = tk.Frame(_Le8, bg=_b._T2)
-        _Lez.pack(fill='x', padx=12, pady=(0, 6))
-        ttk.Button(_Lez, text='ИЗМЕНИТЬ ПРОФИЛЬ…', style='Accent.TButton', command=self.edit_profile).pack(side='left', fill='x', expand=True, padx=(2, 4), pady=4)
-        ttk.Button(_Lez, text='ПО УМОЛЧАНИЮ', command=self.make_default).pack(side='left', fill='x', expand=True, padx=(4, 2), pady=4)
-        _d(_Lfj, color=_b._T9).pack(fill='x', padx=16, pady=(2, 0))
-        _Ley = tk.Frame(_Lfj, bg=_b._T1)
-        _Ley.pack(fill='x', padx=16, pady=(8, 6))
-        _Lex = tk.Frame(_Ley, bg=_b._T1)
-        _Lex.pack(fill='x')
-        tk.Label(_Lex, text='МОДЕЛЬ ПО УМОЛЧАНИЮ', bg=_b._T1, fg=_b._T13, font=_b._T15).pack(side='left', padx=(4, 10))
+        _Lf0 = tk.Frame(_Lfv, bg=_b.bg_panel)
+        _Lf0.pack(fill='x', padx=12, pady=(0, 6))
+        _e(_Lf0, text='ИЗМЕНИТЬ ПРОФИЛЬ…', style='accent', command=self.edit_profile).pack(side='left', fill='x', expand=True, padx=(2, 4), pady=4)
+        _e(_Lf0, text='ПО УМОЛЧАНИЮ', command=self.make_default).pack(side='left', fill='x', expand=True, padx=(4, 2), pady=4)
+        _f(_Lfi, color=_b.amber).pack(fill='x', padx=16, pady=(2, 0))
+        _Lf1 = tk.Frame(_Lfi, bg=_b.bg)
+        _Lf1.pack(fill='x', padx=16, pady=(8, 6))
+        _Lf2 = tk.Frame(_Lf1, bg=_b.bg)
+        _Lf2.pack(fill='x')
+        tk.Label(_Lf2, text='МОДЕЛЬ ПО УМОЛЧАНИЮ', bg=_b.bg, fg=_b.ink_dim, font=_b.mono_small).pack(side='left', padx=(4, 10))
         self.var_default_model = tk.StringVar()
-        _Lew = ttk.Entry(_Lex, textvariable=self.var_default_model, font=_b._T14)
-        _Lew.configure(state='readonly')
-        _Lew.pack(side='left', fill='x', expand=True, padx=4, pady=4)
-        ttk.Button(_Lex, text='ПРИМЕНИТЬ К КОНФИГУ', style='Accent.TButton', command=self.write_config).pack(side='left', padx=(8, 4))
-        self.lbl_dirty = tk.Label(_Lex, text='', bg=_b._T1, fg=_b._T9, font=_b._T15)
+        _Lf3 = ttk.Entry(_Lf2, textvariable=self.var_default_model, font=_b.mono)
+        _Lf3.configure(state='readonly')
+        _Lf3.pack(side='left', fill='x', expand=True, padx=4, pady=4)
+        _e(_Lf2, text='ПРИМЕНИТЬ К КОНФИГУ', style='accent', command=self.write_config).pack(side='left', padx=(8, 4))
+        self.lbl_dirty = tk.Label(_Lf2, text='', bg=_b.bg, fg=_b.amber, font=_b.mono_small)
         self.lbl_dirty.pack(side='left', padx=(6, 2))
-        _Lev = tk.Frame(_Ley, bg=_b._T1)
-        _Lev.pack(fill='x', pady=(6, 0))
-        ttk.Button(_Lev, text='ИСТОРИЯ И ОТКАТ…', command=self.open_history).pack(side='left', padx=3)
-        ttk.Button(_Lev, text='СНИМОК СЕЙЧАС', command=lambda: self.snapshot_now('Ручной снимок')).pack(side='left', padx=3)
-        ttk.Button(_Lev, text='ЭКСПОРТ ВСЕХ ПРОФИЛЕЙ…', command=self.export_profile).pack(side='left', padx=3)
-        ttk.Button(_Lev, text='ИМПОРТ ПРОФИЛЕЙ…', command=self.import_profile).pack(side='left', padx=3)
-        self.hist_info = tk.Label(_Lev, text='Снимков: 0', bg=_b._T1, fg=_b._T7, font=_b._T15, anchor='e')
+        _Lf4 = tk.Frame(_Lf1, bg=_b.bg)
+        _Lf4.pack(fill='x', pady=(6, 0))
+        _e(_Lf4, text='ИСТОРИЯ И ОТКАТ…', command=self.open_history).pack(side='left', padx=3)
+        _e(_Lf4, text='СНИМОК СЕЙЧАС', command=lambda: self.snapshot_now('Ручной снимок')).pack(side='left', padx=3)
+        _e(_Lf4, text='ЭКСПОРТ ВСЕХ ПРОФИЛЕЙ…', command=self.export_profile).pack(side='left', padx=3)
+        _e(_Lf4, text='ИМПОРТ ПРОФИЛЕЙ…', command=self.import_profile).pack(side='left', padx=3)
+        self.hist_info = tk.Label(_Lf4, text='Снимков: 0', bg=_b.bg, fg=_b.cyan_soft, font=_b.mono_small, anchor='e')
         self.hist_info.pack(side='right', padx=(6, 10))
-        tk.Frame(_Lev, bg=_b._T1).pack(side='left', fill='x', expand=True)
-        tk.Label(_Lfj, text='CTRL+Z — ОТКАТ К ПРЕДЫДУЩЕЙ ВЕРСИИ', bg=_b._T1, fg=_b._T8, font=_b._T15).pack(anchor='w', padx=22, pady=(0, 2))
-        _Leu = tk.Frame(_Lfj, bg=_b._T3, height=26)
-        _Leu.pack(fill='x', side='bottom')
-        _Leu.pack_propagate(False)
-        self.status = tk.Label(_Leu, text='', bg=_b._T3, fg=_b._T7, font=_b._T15, anchor='w')
+        tk.Frame(_Lf4, bg=_b.bg).pack(side='left', fill='x', expand=True)
+        tk.Label(_Lfi, text='CTRL+Z — ОТКАТ К ПРЕДЫДУЩЕЙ ВЕРСИИ', bg=_b.bg, fg=_b.cyan_dim, font=_b.mono_small).pack(anchor='w', padx=22, pady=(0, 2))
+        _Lf5 = tk.Frame(_Lfi, bg=_b.bg_panel_hi, height=26)
+        _Lf5.pack(fill='x', side='bottom')
+        _Lf5.pack_propagate(False)
+        self.status = tk.Label(_Lf5, text='', bg=_b.bg_panel_hi, fg=_b.cyan_soft, font=_b.mono_small, anchor='w')
         self.status.pack(side='left', fill='x', expand=True, padx=14)
 
-    def _toggle_entry(self, _Lfk):
-        _Lfl = _Lfk.cget('show') == ''
-        _Lfk.configure(show='•' if _Lfl else '')
+    def _toggle_entry(self, _Lga):
+        _Lgb = _Lga.cget('show') == ''
+        _Lga.configure(show='•' if _Lgb else '')
 
     def load(self):
-        _Lfn = Path(self.var_path.get().strip() or _h())
-        self.config_path = _Lfn
+        _Lgc = Path(self.var_path.get().strip() or _j())
+        self.config_path = _Lgc
         try:
-            self.config = _j(_Lfn)
-            self.profiles = _x(self.config)
-        except Exception as _Lfm:
-            messagebox.showerror('Чтение конфига', 'Не удалось прочитать:\n%s\n\n%s' % (_Lfn, _Lfm))
+            self.config = _l(_Lgc)
+            self.profiles = _z(self.config)
+        except Exception as _Lgd:
+            messagebox.showerror('Чтение конфига', 'Не удалось прочитать:\n%s\n\n%s' % (_Lgc, _Lgd))
             self.config, self.profiles = ({}, [])
-        self.var_default_model.set(_y(self.config) or '(не задана)')
+        self.var_default_model.set(_0(self.config) or '(не задана)')
         self._render_list()
         self._refresh_history()
         self._base_signature = self._signature()
-        self._set_status('ЗАГРУЖЕНО ПРОФИЛЕЙ: %d   •   %s' % (len(self.profiles), _Lfn))
+        self._set_status('ЗАГРУЖЕНО ПРОФИЛЕЙ: %d   •   %s' % (len(self.profiles), _Lgc))
 
     def _signature(self) -> str:
         try:
@@ -1478,24 +1650,24 @@ class App:
         return self._base_signature != self._signature()
 
     def _refresh_dirty_marker(self):
-        _Lfo = getattr(self, 'lbl_dirty', None)
-        if _Lfo is None:
+        _Lge = getattr(self, 'lbl_dirty', None)
+        if _Lge is None:
             return
         try:
-            _Lfo.configure(text='● ЕСТЬ НЕСОХРАНЁННЫЕ ИЗМЕНЕНИЯ' if self._is_dirty() else '')
+            _Lge.configure(text='● ЕСТЬ НЕСОХРАНЁННЫЕ ИЗМЕНЕНИЯ' if self._is_dirty() else '')
         except Exception:
             pass
 
-    def _set_status(self, _Lfp):
+    def _set_status(self, _Lgf):
         try:
-            self.status.configure(text=_Lfp)
+            self.status.configure(text=_Lgf)
         except Exception:
             pass
 
     def _render_list(self):
         self.tree.delete(*self.tree.get_children())
-        for _Lfq in self.profiles:
-            self.tree.insert('', 'end', iid=_Lfq['id'], values=(_Lfq['display_name'], _Lfq['base_url']))
+        for _Lgg in self.profiles:
+            self.tree.insert('', 'end', iid=_Lgg['id'], values=(_Lgg['display_name'], _Lgg['base_url']))
         try:
             self.lbl_count.configure(text=str(len(self.profiles)))
         except Exception:
@@ -1507,145 +1679,145 @@ class App:
             self._clear_details()
         self._refresh_dirty_marker()
 
-    def _find(self, _Lfr):
-        for _Lfs in self.profiles:
-            if _Lfs['id'] == _Lfr:
-                return _Lfs
+    def _find(self, _Lgh):
+        for _Lgi in self.profiles:
+            if _Lgi['id'] == _Lgh:
+                return _Lgi
         return None
 
     def _on_select(self):
-        _Lf0 = self.tree.selection()
-        if not _Lf0:
+        _Lgj = self.tree.selection()
+        if not _Lgj:
             self._clear_details()
             return
-        self.selected = _Lf0[0]
-        _Lfz = self._find(self.selected)
-        if not _Lfz:
+        self.selected = _Lgj[0]
+        _Lgk = self._find(self.selected)
+        if not _Lgk:
             return
-        self.lbl_title.configure(text=(_Lfz['display_name'] or _Lfz['id']).upper())
-        for _Lfy in ('id', 'display_name', 'base_url', 'package'):
-            self.detail_vars[_Lfy].set(_Lfz[_Lfy])
-        _Lfy = _Lfz['api_key']
-        self.detail_vars['api_key'].set('(не задан)' if not _Lfy else _Lfy[:6] + '…' + _Lfy[-4:] if len(_Lfy) > 12 else '••••')
+        self.lbl_title.configure(text=(_Lgk['display_name'] or _Lgk['id']).upper())
+        for _Lgl in ('id', 'display_name', 'base_url', 'package'):
+            self.detail_vars[_Lgl].set(_Lgk[_Lgl])
+        _Lgl = _Lgk['api_key']
+        self.detail_vars['api_key'].set('(не задан)' if not _Lgl else _Lgl[:6] + '…' + _Lgl[-4:] if len(_Lgl) > 12 else '••••')
         self.lst_models.delete(0, 'end')
-        for _Lfx in _Lfz['models']:
-            self.lst_models.insert('end', _Lfx)
-        if _Lfz['models']:
-            _Lft = self.var_default_model.get()
-            _Lfu = str(_Lfz['id']) + '/'
-            _Lfv = 0
-            if _Lft.startswith(_Lfu):
-                _Lfw = _Lft[len(_Lfu):]
-                if _Lfw in _Lfz['models']:
-                    _Lfv = _Lfz['models'].index(_Lfw)
-            self.lst_models.selection_set(_Lfv)
-            self.lst_models.see(_Lfv)
+        for _Lgm in _Lgk['models']:
+            self.lst_models.insert('end', _Lgm)
+        if _Lgk['models']:
+            _Lgn = self.var_default_model.get()
+            _Lgo = str(_Lgk['id']) + '/'
+            _Lgp = 0
+            if _Lgn.startswith(_Lgo):
+                _Lgq = _Lgn[len(_Lgo):]
+                if _Lgq in _Lgk['models']:
+                    _Lgp = _Lgk['models'].index(_Lgq)
+            self.lst_models.selection_set(_Lgp)
+            self.lst_models.see(_Lgp)
         else:
             self.lst_models.insert('end', '(модели не выбраны)')
         try:
-            self.lbl_models_count.configure(text=str(len(_Lfz['models'])))
-            self.lst_models.configure(height=max(3, min(10, len(_Lfz['models']) or 3)))
+            self.lbl_models_count.configure(text=str(len(_Lgk['models'])))
+            self.lst_models.configure(height=max(3, min(10, len(_Lgk['models']) or 3)))
         except Exception:
             pass
-        self._show_balance(_Lfz)
-        if not _Lfz.get('_balance') and (not _Lfz.get('_balance_tried')):
-            _Lfz['_balance_tried'] = True
+        self._show_balance(_Lgk)
+        if not _Lgk.get('_balance') and (not _Lgk.get('_balance_tried')):
+            _Lgk['_balance_tried'] = True
             self.root.after(250, self.request_balance)
 
     def _clear_details(self):
         self.lbl_title.configure(text='— НЕ ВЫБРАН —')
-        for _Lf1 in self.detail_vars.values():
-            _Lf1.set('')
+        for _Lgr in self.detail_vars.values():
+            _Lgr.set('')
         self.lst_models.delete(0, 'end')
 
     def add_profile(self):
-        _Lf3 = _5(self, None)
-        self.root.wait_window(_Lf3)
-        _Lf2 = _Lf3.result
-        if not _Lf2:
+        _Lgs = _ab(self, None)
+        self.root.wait_window(_Lgs)
+        _Lgt = _Lgs.result
+        if not _Lgt:
             return
-        self.profiles.append(self._from_dialog(_Lf2))
+        self.profiles.append(self._from_dialog(_Lgt))
         self._render_list()
-        self.tree.selection_set(_Lf2['id'])
-        self._set_status('ДОБАВЛЕН ПРОФИЛЬ %s (НЕ СОХРАНЁН)' % _Lf2['id'])
+        self.tree.selection_set(_Lgt['id'])
+        self._set_status('ДОБАВЛЕН ПРОФИЛЬ %s (НЕ СОХРАНЁН)' % _Lgt['id'])
         self._refresh_dirty_marker()
-        if _Lf2.get('set_default') and _Lf2['models']:
-            self.var_default_model.set('%s/%s' % (_Lf2['id'], _Lf2['models'][0]))
+        if _Lgt.get('set_default') and _Lgt['models']:
+            self.var_default_model.set('%s/%s' % (_Lgt['id'], _Lgt['models'][0]))
 
     def edit_profile(self):
         if not self.selected:
             messagebox.showinfo('Изменить', 'Выберите профиль в списке', parent=self.root)
             return
-        _Lf7 = self._find(self.selected)
-        if not _Lf7:
+        _Lgu = self._find(self.selected)
+        if not _Lgu:
             return
-        _Lf6 = _5(self, _Lf7)
-        self.root.wait_window(_Lf6)
-        _Lf5 = _Lf6.result
-        if not _Lf5:
+        _Lgv = _ab(self, _Lgu)
+        self.root.wait_window(_Lgv)
+        _Lgw = _Lgv.result
+        if not _Lgw:
             return
-        _Lf4 = self.profiles.index(_Lf7)
-        self.profiles[_Lf4] = self._from_dialog(_Lf5)
-        self.selected = _Lf5['id']
+        _Lgx = self.profiles.index(_Lgu)
+        self.profiles[_Lgx] = self._from_dialog(_Lgw)
+        self.selected = _Lgw['id']
         self._render_list()
-        self._set_status('ПРОФИЛЬ %s ОБНОВЛЁН (НЕ СОХРАНЁН)' % _Lf5['id'])
+        self._set_status('ПРОФИЛЬ %s ОБНОВЛЁН (НЕ СОХРАНЁН)' % _Lgw['id'])
         self._refresh_dirty_marker()
 
-    def _from_dialog(self, _Lf8):
-        return {'id': _Lf8['id'], 'display_name': _Lf8['display_name'], 'base_url': _Lf8['base_url'], 'api_key': _Lf8['api_key'], 'package': _Lf8['package'], 'models': list(_Lf8['models']), 'known_models': list(_Lf8['known_models']), 'coefficient': _Lf8.get('coefficient') or '', 'extra_settings': _Lf8.get('extra_settings') or {}, '_raw': _Lf8.get('_raw')}
+    def _from_dialog(self, _Lgy):
+        return {'id': _Lgy['id'], 'display_name': _Lgy['display_name'], 'base_url': _Lgy['base_url'], 'api_key': _Lgy['api_key'], 'package': _Lgy['package'], 'models': list(_Lgy['models']), 'known_models': list(_Lgy['known_models']), 'coefficient': _Lgy.get('coefficient') or '', 'extra_settings': _Lgy.get('extra_settings') or {}, '_raw': _Lgy.get('_raw')}
 
     def delete_profile(self):
-        _Lf9 = self._find(self.selected) if self.selected else None
-        if not _Lf9:
+        _Lgz = self._find(self.selected) if self.selected else None
+        if not _Lgz:
             messagebox.showinfo('Удалить', 'Выберите профиль в списке', parent=self.root)
             return
-        if not messagebox.askyesno('Удалить профиль', 'Удалить профиль «%s»?\n\nИз конфига он исчезнет после «ПРИМЕНИТЬ К КОНФИГУ».' % _Lf9['display_name'], parent=self.root):
+        if not messagebox.askyesno('Удалить профиль', 'Удалить профиль «%s»?\n\nИз конфига он исчезнет после «ПРИМЕНИТЬ К КОНФИГУ».' % _Lgz['display_name'], parent=self.root):
             return
-        self.profiles.remove(_Lf9)
+        self.profiles.remove(_Lgz)
         self.selected = None
         self._render_list()
-        self._set_status('ПРОФИЛЬ %s УДАЛЁН ИЗ СПИСКА' % _Lf9['id'])
+        self._set_status('ПРОФИЛЬ %s УДАЛЁН ИЗ СПИСКА' % _Lgz['id'])
         self._refresh_dirty_marker()
 
     def make_default(self):
-        _Lgb = self._find(self.selected) if self.selected else None
-        if not _Lgb or not _Lgb['models']:
+        _Lg0 = self._find(self.selected) if self.selected else None
+        if not _Lg0 or not _Lg0['models']:
             messagebox.showinfo('По умолчанию', 'У выбранного профиля нет моделей', parent=self.root)
             return
-        _Lga = self._selected_model()
-        if not _Lga:
-            if len(_Lgb['models']) == 1:
-                _Lga = _Lgb['models'][0]
+        _Lg1 = self._selected_model()
+        if not _Lg1:
+            if len(_Lg0['models']) == 1:
+                _Lg1 = _Lg0['models'][0]
             else:
-                _Lga = self._ask_model(_Lgb)
-                if not _Lga:
+                _Lg1 = self._ask_model(_Lg0)
+                if not _Lg1:
                     return
-        self._apply_default(_Lgb, _Lga)
+        self._apply_default(_Lg0, _Lg1)
 
     def _selected_model(self):
         try:
-            _Lgc = self.lst_models.curselection()
-            if _Lgc:
-                _Lgd = self.lst_models.get(_Lgc[0])
-                if _Lgd and _Lgd != '(модели не выбраны)':
-                    return _Lgd
+            _Lg2 = self.lst_models.curselection()
+            if _Lg2:
+                _Lg3 = self.lst_models.get(_Lg2[0])
+                if _Lg3 and _Lg3 != '(модели не выбраны)':
+                    return _Lg3
         except Exception:
             pass
         return None
 
-    def _apply_default(self, _Lge, _Lgf):
-        self.var_default_model.set('%s/%s' % (_Lge['id'], _Lgf))
-        self._set_status('МОДЕЛЬ ПО УМОЛЧАНИЮ: %s/%s (НЕ СОХРАНЕНО)' % (_Lge['id'], _Lgf))
+    def _apply_default(self, _Lg4, _Lg5):
+        self.var_default_model.set('%s/%s' % (_Lg4['id'], _Lg5))
+        self._set_status('МОДЕЛЬ ПО УМОЛЧАНИЮ: %s/%s (НЕ СОХРАНЕНО)' % (_Lg4['id'], _Lg5))
         self._refresh_dirty_marker()
 
     def _ask_model(self, profile):
         win = tk.Toplevel(self.root)
         win.title('МОДЕЛЬ ПО УМОЛЧАНИЮ')
-        win.configure(bg=_b._T1)
+        win.configure(bg=_b.bg)
         win.transient(self.root)
         win.grab_set()
-        tk.Label(win, text='ВЫБЕРИТЕ МОДЕЛЬ', bg=_b._T1, fg=_b._T6, font=_b._T16).pack(anchor='w', padx=14, pady=(12, 6))
-        lb = tk.Listbox(win, height=min(12, len(profile['models'])), width=62, bg=_b._T2, fg=_b._T12, selectbackground='#0b3547', selectforeground=_b._T6, font=_b._T15, relief='flat', highlightthickness=1, highlightbackground=_b._T5)
+        tk.Label(win, text='ВЫБЕРИТЕ МОДЕЛЬ', bg=_b.bg, fg=_b.cyan, font=_b.mono_title).pack(anchor='w', padx=14, pady=(12, 6))
+        lb = tk.Listbox(win, height=min(12, len(profile['models'])), width=62, bg=_b.bg_panel, fg=_b.ink, selectbackground='#0b3547', selectforeground=_b.cyan, font=_b.mono_small, relief='flat', highlightthickness=1, highlightbackground=_b.line)
         for mid in profile['models']:
             lb.insert('end', mid)
         lb.pack(fill='both', expand=True, padx=14, pady=4)
@@ -1653,14 +1825,14 @@ class App:
         chosen = {'value': None}
 
         def ok():
-            _Lhq = lb.curselection()
-            if _Lhq:
-                chosen['value'] = profile['models'][_Lhq[0]]
+            _Lig = lb.curselection()
+            if _Lig:
+                chosen['value'] = profile['models'][_Lig[0]]
             win.destroy()
-        row = tk.Frame(win, bg=_b._T1)
+        row = tk.Frame(win, bg=_b.bg)
         row.pack(fill='x', padx=14, pady=(4, 12))
-        ttk.Button(row, text='ОК', style='Accent.TButton', command=ok).pack(side='right', padx=4)
-        ttk.Button(row, text='ОТМЕНА', command=win.destroy).pack(side='right')
+        _e(row, text='ОК', style='accent', command=ok).pack(side='right', padx=4)
+        _e(row, text='ОТМЕНА', command=win.destroy).pack(side='right')
         win.wait_window()
         return chosen['value']
 
@@ -1671,7 +1843,7 @@ class App:
         if not profile:
             messagebox.showinfo('Баланс', 'Выберите профиль в списке', parent=self.root)
             return
-        self.lbl_balance_main.configure(text='ЗАГРУЗКА…', fg=_b._T13)
+        self.lbl_balance_main.configure(text='ЗАГРУЗКА…', fg=_b.ink_dim)
         self.lbl_balance_when.configure(text='запрос…')
         try:
             self.btn_balance_main.configure(state='disabled')
@@ -1680,15 +1852,15 @@ class App:
 
         def work():
             try:
-                self._balance_results.put((profile['id'], _t(profile['base_url'], profile['api_key']), None))
-            except Exception as _Lhr:
-                self._balance_results.put((profile['id'], None, _Lhr))
+                self._balance_results.put((profile['id'], _v(profile['base_url'], profile['api_key']), None))
+            except Exception as _Lih:
+                self._balance_results.put((profile['id'], None, _Lih))
         threading.Thread(target=work, daemon=True).start()
         self.root.after(120, self._poll_balance)
 
     def _poll_balance(self):
         try:
-            _Lgh, _Lgi, _Lgj = self._balance_results.get_nowait()
+            _Lg7, _Lg8, _Lg9 = self._balance_results.get_nowait()
         except queue.Empty:
             self.root.after(120, self._poll_balance)
             return
@@ -1696,43 +1868,43 @@ class App:
             self.btn_balance_main.configure(state='normal')
         except Exception:
             pass
-        _Lgg = self._find(_Lgh)
-        if _Lgg is None:
+        _Lg6 = self._find(_Lg7)
+        if _Lg6 is None:
             return
-        if _Lgj is not None:
-            self.lbl_balance_main.configure(text='нет данных', fg=_b._T10)
-            self.lbl_balance_when.configure(text=str(_Lgj)[:70])
-            _Lgg['_balance'] = None
-            _Lgg['_balance_error'] = str(_Lgj)
+        if _Lg9 is not None:
+            self.lbl_balance_main.configure(text='нет данных', fg=_b.red)
+            self.lbl_balance_when.configure(text=str(_Lg9)[:70])
+            _Lg6['_balance'] = None
+            _Lg6['_balance_error'] = str(_Lg9)
             return
-        _Lgg['_balance'] = _Lgi
-        _Lgg['_balance_error'] = None
-        _Lgg['_balance_at'] = datetime.now()
-        if _Lgh == self.selected:
-            self._show_balance(_Lgg)
-        if not _Lgg.get('_balance') and (not _Lgg.get('_balance_tried')):
-            _Lgg['_balance_tried'] = True
+        _Lg6['_balance'] = _Lg8
+        _Lg6['_balance_error'] = None
+        _Lg6['_balance_at'] = datetime.now()
+        if _Lg7 == self.selected:
+            self._show_balance(_Lg6)
+        if not _Lg6.get('_balance') and (not _Lg6.get('_balance_tried')):
+            _Lg6['_balance_tried'] = True
             self.root.after(250, self.request_balance)
 
-    def _show_balance(self, _Lgk):
-        _Lgp = _Lgk.get('_balance')
-        _Lgo = _Lgk.get('_balance_at')
+    def _show_balance(self, _Lha):
+        _Lhb = _Lha.get('_balance')
+        _Lhc = _Lha.get('_balance_at')
         try:
-            if _Lgp:
-                self.lbl_balance_main.configure(text=_Lgp.get('text') or '—', fg=_b._T11)
-                self.lbl_balance_when.configure(text='обновлено %s' % _Lgo.strftime('%H:%M:%S') if _Lgo else '')
-                _Lgl = str(_Lgk.get('coefficient') or '').strip()
-                _Lgm = _s(_Lgp.get('tokens'), _Lgl) if _Lgl else {}
-                if _Lgm:
-                    self.lbl_balance_est_main.configure(text='≈ %s при коэффициенте %s' % (_Lgm['text'], _Lgl))
-                elif not _Lgl:
+            if _Lhb:
+                self.lbl_balance_main.configure(text=_Lhb.get('text') or '—', fg=_b.green)
+                self.lbl_balance_when.configure(text='обновлено %s' % _Lhc.strftime('%H:%M:%S') if _Lhc else '')
+                _Lhd = str(_Lha.get('coefficient') or '').strip()
+                _Lhe = _u(_Lhb.get('tokens'), _Lhd) if _Lhd else {}
+                if _Lhe:
+                    self.lbl_balance_est_main.configure(text='≈ %s при коэффициенте %s' % (_Lhe['text'], _Lhd))
+                elif not _Lhd:
                     self.lbl_balance_est_main.configure(text='коэффициент не задан — укажите в профиле, чтобы видеть остаток в токенах')
                 else:
                     self.lbl_balance_est_main.configure(text='')
             else:
-                _Lgn = _Lgk.get('_balance_error')
-                self.lbl_balance_main.configure(text='—' if not _Lgn else 'нет данных', fg=_b._T13 if not _Lgn else _b._T10)
-                self.lbl_balance_when.configure(text=(_Lgn or '')[:70])
+                _Lhf = _Lha.get('_balance_error')
+                self.lbl_balance_main.configure(text='—' if not _Lhf else 'нет данных', fg=_b.ink_dim if not _Lhf else _b.red)
+                self.lbl_balance_when.configure(text=(_Lhf or '')[:70])
                 self.lbl_balance_est_main.configure(text='')
         except Exception:
             pass
@@ -1740,32 +1912,32 @@ class App:
     def _open_folder(self):
         try:
             os.startfile(str(self.config_path.parent))
-        except Exception as _Lgq:
-            messagebox.showerror('Папка', str(_Lgq), parent=self.root)
+        except Exception as _Lhg:
+            messagebox.showerror('Папка', str(_Lhg), parent=self.root)
 
     def _refresh_history(self):
         try:
-            self._history = _l(self.config_path)
+            self._history = _n(self.config_path)
         except Exception:
             self._history = []
-        _Lgs = getattr(self, 'hist_info', None)
-        if _Lgs is not None:
-            _Lgr = self._history[0]['time'].strftime('%d.%m.%Y %H:%M:%S') if self._history and self._history[0].get('time') else '—'
-            _Lgs.configure(text='Снимков: %d  •  последний: %s' % (len(self._history), _Lgr))
+        _Lhh = getattr(self, 'hist_info', None)
+        if _Lhh is not None:
+            _Lhi = self._history[0]['time'].strftime('%d.%m.%Y %H:%M:%S') if self._history and self._history[0].get('time') else '—'
+            _Lhh.configure(text='Снимков: %d  •  последний: %s' % (len(self._history), _Lhi))
 
     def open_history(self):
-        _6(self)
+        _ac(self)
 
-    def snapshot_now(self, _Lgt=''):
+    def snapshot_now(self, _Lhj=''):
         try:
-            _Lgu = _m(self.config_path)
-        except Exception as _Lgv:
-            messagebox.showerror('Снимок', str(_Lgv), parent=self.root)
+            _Lhl = _o(self.config_path)
+        except Exception as _Lhk:
+            messagebox.showerror('Снимок', str(_Lhk), parent=self.root)
             return None
-        if _Lgu:
+        if _Lhl:
             self._refresh_history()
-            self._set_status((_Lgt + '  •  ' if _Lgt else '') + 'СНИМОК: ' + _Lgu.name)
-        return _Lgu
+            self._set_status((_Lhj + '  •  ' if _Lhj else '') + 'СНИМОК: ' + _Lhl.name)
+        return _Lhl
 
     def undo_last(self):
         if self._is_dirty():
@@ -1777,182 +1949,183 @@ class App:
             return
         self.quick_restore(self._history[0])
 
-    def quick_restore(self, _Lgw):
-        if not _Lgw.get('valid'):
-            messagebox.showerror('Откат', 'Снимок повреждён:\n%s' % _Lgw['name'], parent=self.root)
+    def quick_restore(self, _Lhm):
+        if not _Lhm.get('valid'):
+            messagebox.showerror('Откат', 'Снимок повреждён:\n%s' % _Lhm['name'], parent=self.root)
             return
-        _Lgz = _Lgw['time'].strftime('%d.%m.%Y %H:%M:%S') if _Lgw.get('time') else '?'
-        if not messagebox.askyesno('Откатить конфиг?', 'Восстановить версию от %s?\n\nФайл: %s\nПровайдеры: %s\nМодель: %s\n\nТекущая версия тоже сохранится в историю.' % (_Lgz, _Lgw['path'].name, ', '.join(_Lgw.get('providers') or []) or '(нет)', _Lgw.get('model') or '(не задана)'), parent=self.root):
+        _Lhn = _Lhm['time'].strftime('%d.%m.%Y %H:%M:%S') if _Lhm.get('time') else '?'
+        if not messagebox.askyesno('Откатить конфиг?', 'Восстановить версию от %s?\n\nФайл: %s\nПровайдеры: %s\nМодель: %s\n\nТекущая версия тоже сохранится в историю.' % (_Lhn, _Lhm['path'].name, ', '.join(_Lhm.get('providers') or []) or '(нет)', _Lhm.get('model') or '(не задана)'), parent=self.root):
             return
         try:
-            _Lgx = _p(self.config_path, _Lgw['path'])
-        except Exception as _Lgy:
-            messagebox.showerror('Откат', str(_Lgy), parent=self.root)
+            _Lhp = _r(self.config_path, _Lhm['path'])
+        except Exception as _Lho:
+            messagebox.showerror('Откат', str(_Lho), parent=self.root)
             return
         self.load()
-        self._set_status('ОТКАТ ВЫПОЛНЕН. ВЕРСИЯ ДО ОТКАТА: %s' % (_Lgx.name if _Lgx else '—'))
-        messagebox.showinfo('Откат', 'Конфиг восстановлен из снимка %s.\nОткат самого отката: %s' % (_Lgw['name'], _Lgx.name if _Lgx else '—'), parent=self.root)
+        self._set_status('ОТКАТ ВЫПОЛНЕН. ВЕРСИЯ ДО ОТКАТА: %s' % (_Lhp.name if _Lhp else '—'))
+        messagebox.showinfo('Откат', 'Конфиг восстановлен из снимка %s.\nОткат самого отката: %s' % (_Lhm['name'], _Lhp.name if _Lhp else '—'), parent=self.root)
 
     def write_config(self):
-        _Lg5 = self._is_dirty()
+        _Lhq = self._is_dirty()
         try:
-            _Lg1 = _4(self.config, self.profiles)
-            _Lg2 = self.var_default_model.get().strip()
-            if _Lg2 and _Lg2 != '(не задана)':
-                _Lg1['model'] = _Lg2
-            _Lg3 = _o(self.config_path, _Lg1)
-        except Exception as _Lg4:
-            messagebox.showerror('Запись конфига', str(_Lg4), parent=self.root)
+            _Lht = _6(self.config, self.profiles)
+            _Lhu = self.var_default_model.get().strip()
+            if _Lhu and _Lhu != '(не задана)':
+                _Lht['model'] = _Lhu
+            _Lhv = _q(self.config_path, _Lht)
+        except Exception as _Lhr:
+            messagebox.showerror('Запись конфига', str(_Lhr), parent=self.root)
             return
-        self.config = _Lg1
-        self.profiles = _x(self.config)
+        self.config = _Lht
+        self.profiles = _z(self.config)
         self._base_signature = self._signature()
         self._render_list()
         self._refresh_history()
         self._refresh_dirty_marker()
-        _Lg0 = 'Конфиг записан. Предыдущая версия: %s' % (_Lg3.name if _Lg3 else '—')
-        self._set_status(_Lg0.upper())
-        messagebox.showinfo('Готово', '%s\n\nФайл: %s\n\nОткат: кнопка «ИСТОРИЯ И ОТКАТ…» или Ctrl+Z' % (_Lg0, self.config_path), parent=self.root)
-        if not _Lg5:
-            self._set_status('СОХРАНЕНА КОНТРОЛЬНАЯ ТОЧКА: ' + (_Lg3.name if _Lg3 else '—'))
+        _Lhs = 'Конфиг записан. Предыдущая версия: %s' % (_Lhv.name if _Lhv else '—')
+        self._set_status(_Lhs.upper())
+        messagebox.showinfo('Готово', '%s\n\nФайл: %s\n\nОткат: кнопка «ИСТОРИЯ И ОТКАТ…» или Ctrl+Z' % (_Lhs, self.config_path), parent=self.root)
+        if not _Lhq:
+            self._set_status('СОХРАНЕНА КОНТРОЛЬНАЯ ТОЧКА: ' + (_Lhv.name if _Lhv else '—'))
 
     def export_profile(self):
         if not self.profiles:
             messagebox.showinfo('Экспорт профилей', 'Список профилей пуст — нечего сохранять', parent=self.root)
             return
-        _Lha = _build_export_payload(self.profiles, self.var_default_model.get())
-        _Lg9 = str(Path.home() / 'Downloads')
-        _Lg8 = filedialog.asksaveasfilename(parent=self.root, title='Экспорт всех профилей моделей', defaultextension='.json', initialdir=_Lg9 if Path(_Lg9).is_dir() else str(Path.home()), initialfile='opencode-profiles.json', filetypes=[('JSON файлы', '*.json'), ('Все файлы', '*.*')])
-        if not _Lg8:
+        _Lhw = _8(self.profiles, self.var_default_model.get())
+        _Lhx = str(Path.home() / 'Downloads')
+        _Lhy = filedialog.asksaveasfilename(parent=self.root, title='Экспорт всех профилей моделей', defaultextension='.json', initialdir=_Lhx if Path(_Lhx).is_dir() else str(Path.home()), initialfile='opencode-profiles.json', filetypes=[('JSON файлы', '*.json'), ('Все файлы', '*.*')])
+        if not _Lhy:
             return
-        _Lg7 = Path(_Lg8)
-        if _Lg7.suffix.lower() != '.json':
-            _Lg7 = _Lg7.with_suffix('.json')
+        _Lhz = Path(_Lhy)
+        if _Lhz.suffix.lower() != '.json':
+            _Lhz = _Lhz.with_suffix('.json')
         try:
-            _Lg7.parent.mkdir(parents=True, exist_ok=True)
-            _Lg7.write_text(json.dumps(_Lha, indent=2, ensure_ascii=False), encoding='utf-8')
+            _Lhz.parent.mkdir(parents=True, exist_ok=True)
+            _Lhz.write_text(json.dumps(_Lhw, indent=2, ensure_ascii=False), encoding='utf-8')
         except PermissionError:
-            messagebox.showerror('Экспорт', 'Нет доступа к папке: %s\n\nВыберите другую папку (например, Загрузки).' % _Lg7.parent, parent=self.root)
+            messagebox.showerror('Экспорт', 'Нет доступа к папке: %s\n\nВыберите другую папку (например, Загрузки).' % _Lhz.parent, parent=self.root)
             return
-        except Exception as _Lg6:
-            messagebox.showerror('Экспорт', 'Не удалось сохранить файл:\n%s\n\n%s' % (_Lg7, _Lg6), parent=self.root)
+        except Exception as _Lh0:
+            messagebox.showerror('Экспорт', 'Не удалось сохранить файл:\n%s\n\n%s' % (_Lhz, _Lh0), parent=self.root)
             return
-        if not _Lg7.exists():
-            messagebox.showerror('Экспорт', 'Файл не создан: %s' % _Lg7, parent=self.root)
+        if not _Lhz.exists():
+            messagebox.showerror('Экспорт', 'Файл не создан: %s' % _Lhz, parent=self.root)
             return
-        self._set_status('ЭКСПОРТИРОВАНО ПРОФИЛЕЙ: %d → %s' % (len(_Lha['profiles']), _Lg7))
-        messagebox.showinfo('Экспорт', 'Сохранено профилей: %d\n\nФайл:\n%s\n\nРазмер: %d байт' % (len(_Lha['profiles']), _Lg7, _Lg7.stat().st_size), parent=self.root)
+        self._set_status('ЭКСПОРТИРОВАНО ПРОФИЛЕЙ: %d → %s' % (len(_Lhw['profiles']), _Lhz))
+        messagebox.showinfo('Экспорт', 'Сохранено профилей: %d\n\nФайл:\n%s\n\nРазмер: %d байт' % (len(_Lhw['profiles']), _Lhz, _Lhz.stat().st_size), parent=self.root)
 
     def import_profile(self):
-        _Lhj = str(Path.home() / 'Downloads')
-        _Lhi = filedialog.askopenfilename(parent=self.root, title='Импорт профилей', initialdir=_Lhj if Path(_Lhj).is_dir() else str(Path.home()), filetypes=[('JSON файлы', '*.json'), ('Все файлы', '*.*')])
-        if not _Lhi:
+        _Lh1 = str(Path.home() / 'Downloads')
+        _Lh2 = filedialog.askopenfilename(parent=self.root, title='Импорт профилей', initialdir=_Lh1 if Path(_Lh1).is_dir() else str(Path.home()), filetypes=[('JSON файлы', '*.json'), ('Все файлы', '*.*')])
+        if not _Lh2:
             return
-        _Lhh = Path(_Lhi)
-        if not _Lhh.exists():
-            messagebox.showerror('Импорт', 'Файл не найден:\n%s' % _Lhh, parent=self.root)
-            return
-        try:
-            _Lhf = json.loads(_Lhh.read_text(encoding='utf-8-sig'))
-        except Exception as _Lhg:
-            messagebox.showerror('Импорт', 'Не удалось прочитать файл:\n%s\n\n%s' % (_Lhh, _Lhg), parent=self.root)
+        _Lh3 = Path(_Lh2)
+        if not _Lh3.exists():
+            messagebox.showerror('Импорт', 'Файл не найден:\n%s' % _Lh3, parent=self.root)
             return
         try:
-            _Lhm, _Lhn = _profiles_from_export(_Lhf)
-        except ValueError as _Lho:
-            messagebox.showerror('Импорт', '%s\n\nФайл: %s' % (_Lho, _Lhh), parent=self.root)
+            _Lh9 = json.loads(_Lh3.read_text(encoding='utf-8-sig'))
+        except Exception as _Lh4:
+            messagebox.showerror('Импорт', 'Не удалось прочитать файл:\n%s\n\n%s' % (_Lh3, _Lh4), parent=self.root)
             return
-        _Lhp = [_Lhq['id'] for _Lhq in _Lhm if self._find(_Lhq['id']) is not None]
-        if _Lhp and (not messagebox.askyesno('Импорт', 'Уже есть профили с такими ID:\n%s\n\nЗаменить их?' % ', '.join(_Lhp), parent=self.root)):
+        try:
+            _Lib, _Lic = _aa(_Lh9)
+        except ValueError as _Lh4:
+            messagebox.showerror('Импорт', '%s\n\nФайл: %s' % (_Lh4, _Lh3), parent=self.root)
             return
-        _Lhr = _Lhs = 0
-        for _Lht in _Lhm:
-            _Lhu = self._find(_Lht['id'])
-            if _Lhu is not None:
-                self.profiles[self.profiles.index(_Lhu)] = _Lht
-                _Lhs += 1
+        _Lh5 = [_Lid['id'] for _Lid in _Lib if self._find(_Lid['id']) is not None]
+        if _Lh5:
+            if not messagebox.askyesno('Импорт', 'Уже есть профили с такими ID:\n%s\n\nЗаменить их?' % ', '.join(_Lh5), parent=self.root):
+                return
+        _Lh6 = _Lh7 = 0
+        for _Lh8 in _Lib:
+            _Lia = self._find(_Lh8['id'])
+            if _Lia is not None:
+                self.profiles[self.profiles.index(_Lia)] = _Lh8
+                _Lh7 += 1
             else:
-                self.profiles.append(_Lht)
-                _Lhr += 1
-        if _Lhn:
-            self.var_default_model.set(_Lhn)
-        self.selected = _Lhm[0]['id']
+                self.profiles.append(_Lh8)
+                _Lh6 += 1
+        if _Lic:
+            self.var_default_model.set(_Lic)
+        self.selected = _Lib[0]['id']
         self._render_list()
-        self._set_status('ИМПОРТИРОВАНО ПРОФИЛЕЙ: %d (новых %d, заменено %d) — НЕ СОХРАНЁН' % (len(_Lhm), _Lhr, _Lhs))
-        messagebox.showinfo('Импорт', 'Импортировано профилей: %d\nНовых: %d\nЗаменено: %d\n\nНе забудьте «ПРИМЕНИТЬ К КОНФИГУ».' % (len(_Lhm), _Lhr, _Lhs), parent=self.root)
+        self._set_status('ИМПОРТИРОВАНО ПРОФИЛЕЙ: %d (новых %d, заменено %d) — НЕ СОХРАНЁН' % (len(_Lib), _Lh6, _Lh7))
+        messagebox.showinfo('Импорт', 'Импортировано профилей: %d\nНовых: %d\nЗаменено: %d\n\nНе забудьте «ПРИМЕНИТЬ К КОНФИГУ».' % (len(_Lib), _Lh6, _Lh7), parent=self.root)
 
     def run(self):
         self.root.mainloop()
 
-def _ac(_Ldi: str) -> bool:
+def _an(_Led: str) -> bool:
     try:
-        __import__(_Ldi)
+        __import__(_Led)
         return True
     except Exception:
         return False
 REQUIRED = {'certifi': ('certifi', 'актуальные корневые сертификаты для TLS')}
 OPTIONAL = {'PIL': ('Pillow', 'запасной захват экрана диагностики')}
 
-def _ad(_Ldj: str) -> tuple[bool, str]:
+def _ao(_Lee: str) -> tuple[bool, str]:
     import subprocess
     try:
-        _Ldk = subprocess.run([sys.executable, '-m', 'pip', 'install', '--user', '--upgrade', '--quiet', _Ldj], capture_output=True, text=True, timeout=240)
-        if _Ldk.returncode == 0:
+        _Leg = subprocess.run([sys.executable, '-m', 'pip', 'install', '--user', '--upgrade', '--quiet', _Lee], capture_output=True, text=True, timeout=240)
+        if _Leg.returncode == 0:
             return (True, '')
-        _Ldl = (_Ldk.stderr or _Ldk.stdout or '').strip().splitlines()
-        return (False, _Ldl[-1] if _Ldl else 'pip завершился с кодом %d' % _Ldk.returncode)
-    except Exception as _Ldm:
-        return (False, str(_Ldm))
+        _Leh = (_Leg.stderr or _Leg.stdout or '').strip().splitlines()
+        return (False, _Leh[-1] if _Leh else 'pip завершился с кодом %d' % _Leg.returncode)
+    except Exception as _Lef:
+        return (False, str(_Lef))
 
-def _ae() -> list:
-    _Ldt = []
-    if not _ac('tkinter'):
+def _ap() -> list:
+    _Lei = []
+    if not _an('tkinter'):
         return ['tkinter не найден — переустановите Python с компонентом Tcl/Tk']
-    _Ldr = []
-    for _Lds, (_Ldn, _Ldo) in REQUIRED.items():
-        if not _ac(_Lds):
-            _Ldr.append((_Ldn, _Ldo))
+    _Lej = []
+    for _Lek, (_Lel, _Lem) in REQUIRED.items():
+        if not _an(_Lek):
+            _Lej.append((_Lel, _Lem))
     if getattr(sys, 'frozen', False):
-        _Ldr = []
-    if _Ldr and (not _ac('pip')):
+        _Lej = []
+    if _Lej and (not _an('pip')):
         if getattr(sys, 'frozen', False):
-            return _Ldt
+            return _Lei
         try:
             import ensurepip
             ensurepip.bootstrap()
         except Exception:
             pass
-    if _Ldr and (not _ac('pip')):
-        _Ldt.append('pip недоступен — автодогрузка невозможна (python -m ensurepip)')
-        return _Ldt
-    for _Ldn, _Ldo in _Ldr:
-        _Ldt.append('Догружаю %s — %s…' % (_Ldn, _Ldo))
-        _Ldp, _Ldq = _ad(_Ldn)
-        if _Ldp and _ac(_Ldn):
-            _Ldt.append('%s установлен' % _Ldn)
+    if _Lej and (not _an('pip')):
+        _Lei.append('pip недоступен — автодогрузка невозможна (python -m ensurepip)')
+        return _Lei
+    for _Lel, _Lem in _Lej:
+        _Lei.append('Догружаю %s — %s…' % (_Lel, _Lem))
+        _Len, _Leo = _ao(_Lel)
+        if _Len and _an(_Lel):
+            _Lei.append('%s установлен' % _Lel)
         else:
-            _Ldt.append('%s не установился: %s' % (_Ldn, _Ldq or 'неизвестная ошибка'))
-    return _Ldt
+            _Lei.append('%s не установился: %s' % (_Lel, _Leo or 'неизвестная ошибка'))
+    return _Lei
 
-def _af():
+def _aq():
     if os.name != 'nt':
         return
     try:
         import ctypes
-        _Ldu = ctypes.windll.kernel32.GetConsoleWindow()
-        if _Ldu:
-            ctypes.windll.user32.ShowWindow(_Ldu, 0)
+        _Lep = ctypes.windll.kernel32.GetConsoleWindow()
+        if _Lep:
+            ctypes.windll.user32.ShowWindow(_Lep, 0)
             ctypes.windll.kernel32.FreeConsole()
     except Exception:
         pass
 
 def main():
-    _af()
-    _Ldw = _ae()
-    _Ldv = App()
-    if _Ldw:
-        _Ldv._set_status('  •  '.join(_Ldw))
-    _Ldv.run()
+    _aq()
+    _Leq = _ap()
+    _Ler = App()
+    if _Leq:
+        _Ler._set_status('  •  '.join(_Leq))
+    _Ler.run()
     return 0
 if __name__ == '__main__':
     raise SystemExit(main())
