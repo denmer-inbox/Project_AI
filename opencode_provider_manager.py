@@ -212,143 +212,6 @@ class RoundedPanel(tk.Canvas):
 
 
 
-class RoundedButton(tk.Canvas):
-    """Кнопка со скруглёнными углами (замена ttk.Button там, где нужна красота).
-
-    Сохраняет API: .configure(state=...), .cget("text"), .invoke().
-    """
-
-    def __init__(self, master, text="", command=None, style="normal",
-                 width=None, height=30, radius=10, font=None, **kw):
-        self._text = text
-        self._command = command
-        self._state = "normal"
-        self._radius = int(radius)
-        self._font = font or T.mono_small
-        self._preset = style          # normal | accent | danger
-        self._hover = False
-        bg = master.cget("bg") if hasattr(master, "cget") else T.bg
-        self._bg = bg
-        w = width or self._measure(text)
-        super().__init__(master, width=w, height=height, bg=bg,
-                         highlightthickness=0, bd=0, **kw)
-        self._apply_preset()
-        self._draw()
-        self.bind("<Configure>", lambda e: self._draw())
-        self.bind("<Enter>", self._on_enter)
-        self.bind("<Leave>", self._on_leave)
-        self.bind("<Button-1>", self._on_press)
-        self.bind("<ButtonRelease-1>", self._on_release)
-
-    # --- внешний вид ------------------------------------------------------
-    def _apply_preset(self):
-        if self._preset == "accent":
-            self._fill, self._edge, self._fg = "#0b3547", T.cyan, T.cyan
-        elif self._preset == "danger":
-            self._fill, self._edge, self._fg = "#2a0d13", T.red, T.red
-        else:
-            self._fill, self._edge, self._fg = T.bg_panel_hi, T.cyan_dim, T.cyan_soft
-        self._fill_hover = "#0f4a61" if self._preset == "accent" else (
-            "#3d121b" if self._preset == "danger" else "#0b2c3d")
-        self._fill_down = "#124a5f"
-
-    def _measure(self, text):
-        try:
-            import tkinter.font as tkfont
-            f = tkfont.Font(font=self._font)
-            return f.measure(text) + 28
-        except Exception:
-            return max(90, len(text) * 8)
-
-    def _round(self, x1, y1, x2, y2, r, fill, outline):
-        self.create_rectangle(x1 + r, y1, x2 - r, y2, fill=fill, outline="")
-        self.create_rectangle(x1, y1 + r, x1 + r, y2 - r, fill=fill, outline="")
-        self.create_rectangle(x2 - r, y1 + r, x2, y2 - r, fill=fill, outline="")
-        self.create_oval(x1, y1, x1 + 2 * r, y1 + 2 * r, fill=fill, outline="")
-        self.create_oval(x2 - 2 * r, y1, x2, y1 + 2 * r, fill=fill, outline="")
-        self.create_oval(x1, y2 - 2 * r, x1 + 2 * r, y2, fill=fill, outline="")
-        self.create_oval(x2 - 2 * r, y2 - 2 * r, x2, y2, fill=fill, outline="")
-        for (ax1, ay1, ax2, ay2, st) in (
-            (x1, y1, x1 + 2 * r, y1 + 2 * r, 90),
-            (x2 - 2 * r, y1, x2, y1 + 2 * r, 0),
-            (x1, y2 - 2 * r, x1 + 2 * r, y2, 180),
-            (x2 - 2 * r, y2 - 2 * r, x2, y2, 270),
-        ):
-            self.create_arc(ax1, ay1, ax2, ay2, start=st, extent=90,
-                            style="arc", outline=outline)
-
-    def _draw(self):
-        self.delete("all")
-        w = self.winfo_width() or int(self.cget("width"))
-        h = self.winfo_height() or int(self.cget("height"))
-        fill = self._fill_hover if self._hover else self._fill
-        if self._state == "disabled":
-            fill, edge, fg = T.bg_panel, T.cyan_dim, T.cyan_dim
-        else:
-            edge, fg = self._edge, self._fg
-        self._round(1, 1, w - 1, h - 1, self._radius, fill, edge)
-        self.create_text(w / 2, h / 2, text=self._text, fill=fg, font=self._font)
-
-    # --- события ----------------------------------------------------------
-    def _on_enter(self, _=None):
-        self._hover = True
-        self._draw()
-
-    def _on_leave(self, _=None):
-        self._hover = False
-        self._draw()
-
-    def _on_press(self, _=None):
-        if self._state == "disabled":
-            return
-        self.delete("all")
-        w = self.winfo_width()
-        h = self.winfo_height()
-        self._round(1, 1, w - 1, h - 1, self._radius, self._fill_down, self._edge)
-        self.create_text(w / 2, h / 2, text=self._text, fill=self._fg, font=self._font)
-
-    def _on_release(self, _=None):
-        if self._state == "disabled":
-            return
-        self._draw()
-        if self._command:
-            self._command()
-
-    # --- совместимость с ttk.Button --------------------------------------
-    def configure(self, cnf=None, **kw):
-        if "state" in kw:
-            self._state = kw.pop("state")
-        if "text" in kw:
-            self._text = kw.pop("text")
-        if "command" in kw:
-            self._command = kw.pop("command")
-        if kw:
-            try:
-                super().configure(cnf, **kw)
-            except Exception:
-                pass
-        self._draw()
-
-    config = configure
-
-    def cget(self, key):
-        if key == "state":
-            return self._state
-        if key == "text":
-            return self._text
-        if key == "command":
-            return self._command
-        try:
-            return super().cget(key)
-        except Exception:
-            return ""
-
-    def invoke(self):
-        if self._command and self._state != "disabled":
-            self._command()
-
-
-
 class ScanStrip(tk.Canvas):
     """Декоративная линия-разделитель в стиле HUD."""
 
@@ -1123,7 +986,7 @@ class ProfileDialog(tk.Toplevel):
         self._field(form, 1, "НАЗВАНИЕ", self.var_name)
         self._field(form, 2, "URL ПРОВАЙДЕРА", self.var_url)
         self.e_key = self._field(form, 3, "API KEY", self.var_key, show="•")
-        RoundedButton(form, text="ПОКАЗАТЬ", command=self._toggle_key).grid(row=3, column=2, padx=6)
+        ttk.Button(form, text="ПОКАЗАТЬ", command=self._toggle_key).grid(row=3, column=2, padx=6)
         tk.Label(form, text="ТРАНСПОРТ", bg=T.bg, fg=T.cyan_soft, font=T.mono_small,
                  width=15, anchor="w").grid(row=4, column=0, sticky="w", padx=(4, 8), pady=4)
         ttk.Combobox(form, values=PACKAGES, textvariable=self.var_pkg, state="readonly",
@@ -1140,10 +1003,10 @@ class ProfileDialog(tk.Toplevel):
 
         row = tk.Frame(self, bg=T.bg)
         row.pack(fill="x", padx=16, pady=(10, 4))
-        self.btn_check = RoundedButton(row, text="ПОЛУЧИТЬ СПИСОК МОДЕЛЕЙ",
-                                    style="accent", command=self._check_key)
+        self.btn_check = ttk.Button(row, text="ПОЛУЧИТЬ СПИСОК МОДЕЛЕЙ",
+                                    style="Accent.TButton", command=self._check_key)
         self.btn_check.pack(side="left", padx=(4, 6), pady=4)
-        self.btn_balance = RoundedButton(row, text="ЗАПРОСИТЬ БАЛАНС",
+        self.btn_balance = ttk.Button(row, text="ЗАПРОСИТЬ БАЛАНС",
                                       command=self._check_balance)
         self.btn_balance.pack(side="left", padx=(0, 10), pady=4)
         self.lbl_status = tk.Label(row, text="ВВЕДИТЕ URL И КЛЮЧ, ЗАТЕМ ЗАПРОСИТЕ МОДЕЛИ",
@@ -1175,9 +1038,9 @@ class ProfileDialog(tk.Toplevel):
         mhead.pack(fill="x")
         tk.Label(mhead, text="ДОСТУПНЫЕ МОДЕЛИ", bg=T.bg, fg=T.cyan,
                  font=T.mono_title).pack(side="left", padx=2)
-        RoundedButton(mhead, text="☑ ВСЕ", width=8, style="accent",
+        ttk.Button(mhead, text="☑ ВСЕ", width=8, style="Accent.TButton",
                    command=lambda: self._set_all(True)).pack(side="right", padx=3)
-        RoundedButton(mhead, text="☐ НИЧЕГО", width=10, style="accent",
+        ttk.Button(mhead, text="☐ НИЧЕГО", width=10, style="Accent.TButton",
                    command=lambda: self._set_all(False)).pack(side="right", padx=3)
         self.lbl_selected = tk.Label(mhead, text="ОТМЕЧЕНО: 0 / 0", bg=T.bg, fg=T.amber,
                                      font=T.mono_small)
@@ -1220,8 +1083,8 @@ class ProfileDialog(tk.Toplevel):
         tk.Checkbutton(bottom, text="МОДЕЛЬ ПО УМОЛЧАНИЮ", variable=self.var_set_default,
                        bg=T.bg, fg=T.ink, selectcolor=T.bg_input, activebackground=T.bg,
                        activeforeground=T.cyan, font=T.mono_small, bd=0).pack(side="left", padx=4)
-        RoundedButton(bottom, text="ОТМЕНА", command=self._cancel).pack(side="right", padx=4)
-        RoundedButton(bottom, text="СОХРАНИТЬ", style="accent",
+        ttk.Button(bottom, text="ОТМЕНА", command=self._cancel).pack(side="right", padx=4)
+        ttk.Button(bottom, text="СОХРАНИТЬ", style="Accent.TButton",
                    command=self._save).pack(side="right", padx=4)
 
     def _bind_wheel(self, _=None):
@@ -1488,16 +1351,16 @@ class HistoryWindow(tk.Toplevel):
         head.pack(fill="x", padx=16, pady=(14, 2))
         tk.Label(head, text="ИСТОРИЯ ВЕРСИЙ", bg=T.bg, fg=T.cyan,
                  font=T.mono_title).pack(side="left", padx=2)
-        RoundedButton(head, text="СНИМОК СЕЙЧАС", command=self.make_now).pack(side="right", padx=4)
-        RoundedButton(head, text="ОБНОВИТЬ", command=self.reload).pack(side="right", padx=4)
+        ttk.Button(head, text="СНИМОК СЕЙЧАС", command=self.make_now).pack(side="right", padx=4)
+        ttk.Button(head, text="ОБНОВИТЬ", command=self.reload).pack(side="right", padx=4)
         ScanStrip(self, color=T.cyan).pack(fill="x", padx=16, pady=(4, 8))
 
         foot = tk.Frame(self, bg=T.bg)
         foot.pack(side="bottom", fill="x", padx=16, pady=(4, 14))
         tk.Label(foot, text="ОТКАТ ВОССТАНАВЛИВАЕТ ФАЙЛ ЦЕЛИКОМ", bg=T.bg, fg=T.ink_dim,
                  font=T.mono_small).pack(side="left", padx=4)
-        RoundedButton(foot, text="ЗАКРЫТЬ", command=self.destroy).pack(side="right", padx=4)
-        RoundedButton(foot, text="ВОССТАНОВИТЬ ВЫБРАННОЕ", style="accent",
+        ttk.Button(foot, text="ЗАКРЫТЬ", command=self.destroy).pack(side="right", padx=4)
+        ttk.Button(foot, text="ВОССТАНОВИТЬ ВЫБРАННОЕ", style="Accent.TButton",
                    command=self.restore_selected).pack(side="right", padx=4)
 
         prev = tk.Frame(self, bg=T.bg)
@@ -1969,8 +1832,8 @@ class App:
             fill="x", pady=(2, 0))
         btns = tk.Frame(header, bg=T.bg)
         btns.pack(side="right", padx=(8, 2))
-        RoundedButton(btns, text="ОТКРЫТЬ ПАПКУ", command=self._open_folder).pack(side="left", padx=3)
-        RoundedButton(btns, text="ПЕРЕЗАГРУЗИТЬ", command=self.load).pack(side="left", padx=3)
+        ttk.Button(btns, text="ОТКРЫТЬ ПАПКУ", command=self._open_folder).pack(side="left", padx=3)
+        ttk.Button(btns, text="ПЕРЕЗАГРУЗИТЬ", command=self.load).pack(side="left", padx=3)
 
         ScanStrip(root, color=T.cyan).pack(fill="x", padx=16, pady=(6, 0))
 
@@ -2007,10 +1870,10 @@ class App:
 
         brow = tk.Frame(left, bg=T.bg_panel)
         brow.pack(fill="x", padx=8, pady=(6, 10))
-        RoundedButton(brow, text="+ ДОБАВИТЬ", style="accent",
+        ttk.Button(brow, text="+ ДОБАВИТЬ", style="Accent.TButton",
                    command=self.add_profile).pack(side="left", padx=(2, 3), pady=4)
-        RoundedButton(brow, text="ИЗМЕНИТЬ", command=self.edit_profile).pack(side="left", padx=3)
-        RoundedButton(brow, text="УДАЛИТЬ", style="danger",
+        ttk.Button(brow, text="ИЗМЕНИТЬ", command=self.edit_profile).pack(side="left", padx=3)
+        ttk.Button(brow, text="УДАЛИТЬ", style="Danger.TButton",
                    command=self.delete_profile).pack(side="left", padx=3)
 
         # правая колонка
@@ -2043,7 +1906,7 @@ class App:
             ent.configure(state="readonly")
             if key == "api_key":
                 ent.configure(show="•")
-                RoundedButton(grid, text="ПОКАЗАТЬ",
+                ttk.Button(grid, text="ПОКАЗАТЬ",
                            command=lambda e=ent: self._toggle_entry(e)).grid(row=row, column=2,
                                                                              padx=6)
         grid.columnconfigure(1, weight=1)
@@ -2055,7 +1918,7 @@ class App:
         self.lbl_balance_main = tk.Label(balpan, text="—", bg=T.bg_panel, fg=T.ink_dim,
                                          font=T.mono)
         self.lbl_balance_main.pack(side="left", padx=(10, 8))
-        self.btn_balance_main = RoundedButton(balpan, text="ОБНОВИТЬ",
+        self.btn_balance_main = ttk.Button(balpan, text="ОБНОВИТЬ",
                                            command=self.request_balance)
         self.btn_balance_main.pack(side="right", padx=2)
         self.lbl_balance_when = tk.Label(balpan, text="", bg=T.bg_panel, fg=T.cyan_dim,
@@ -2084,10 +1947,10 @@ class App:
 
         actions = tk.Frame(right, bg=T.bg_panel)
         actions.pack(fill="x", padx=12, pady=(0, 6))
-        RoundedButton(actions, text="ИЗМЕНИТЬ ПРОФИЛЬ…", style="accent",
+        ttk.Button(actions, text="ИЗМЕНИТЬ ПРОФИЛЬ…", style="Accent.TButton",
                    command=self.edit_profile).pack(side="left", fill="x", expand=True,
                                                   padx=(2, 4), pady=4)
-        RoundedButton(actions, text="ПО УМОЛЧАНИЮ",
+        ttk.Button(actions, text="ПО УМОЛЧАНИЮ",
                    command=self.make_default).pack(side="left", fill="x", expand=True,
                                                   padx=(4, 2), pady=4)
 
@@ -2103,20 +1966,20 @@ class App:
         ent = ttk.Entry(leftrow, textvariable=self.var_default_model, font=T.mono)
         ent.configure(state="readonly")
         ent.pack(side="left", fill="x", expand=True, padx=4, pady=4)
-        RoundedButton(leftrow, text="ПРИМЕНИТЬ К КОНФИГУ", style="accent",
+        ttk.Button(leftrow, text="ПРИМЕНИТЬ К КОНФИГУ", style="Accent.TButton",
                    command=self.write_config).pack(side="left", padx=(8, 4))
         self.lbl_dirty = tk.Label(leftrow, text="", bg=T.bg, fg=T.amber, font=T.mono_small)
         self.lbl_dirty.pack(side="left", padx=(6, 2))
 
         row2 = tk.Frame(footer, bg=T.bg)
         row2.pack(fill="x", pady=(6, 0))
-        RoundedButton(row2, text="ИСТОРИЯ И ОТКАТ…",
+        ttk.Button(row2, text="ИСТОРИЯ И ОТКАТ…",
                    command=self.open_history).pack(side="left", padx=3)
-        RoundedButton(row2, text="СНИМОК СЕЙЧАС",
+        ttk.Button(row2, text="СНИМОК СЕЙЧАС",
                    command=lambda: self.snapshot_now("Ручной снимок")).pack(side="left", padx=3)
-        RoundedButton(row2, text="ЭКСПОРТ ВСЕХ ПРОФИЛЕЙ…",
+        ttk.Button(row2, text="ЭКСПОРТ ВСЕХ ПРОФИЛЕЙ…",
                    command=self.export_profile).pack(side="left", padx=3)
-        RoundedButton(row2, text="ИМПОРТ ПРОФИЛЕЙ…",
+        ttk.Button(row2, text="ИМПОРТ ПРОФИЛЕЙ…",
                    command=self.import_profile).pack(side="left", padx=3)
         self.hist_info = tk.Label(row2, text="Снимков: 0", bg=T.bg, fg=T.cyan_soft,
                                   font=T.mono_small, anchor="e")
@@ -2374,8 +2237,8 @@ class App:
 
         row = tk.Frame(win, bg=T.bg)
         row.pack(fill="x", padx=14, pady=(4, 12))
-        RoundedButton(row, text="ОК", style="accent", command=ok).pack(side="right", padx=4)
-        RoundedButton(row, text="ОТМЕНА", command=win.destroy).pack(side="right")
+        ttk.Button(row, text="ОК", style="Accent.TButton", command=ok).pack(side="right", padx=4)
+        ttk.Button(row, text="ОТМЕНА", command=win.destroy).pack(side="right")
         win.wait_window()
         return chosen["value"]
 
