@@ -52,3 +52,5 @@ dist/*
 !dist/OpenCodeProviderManager/
 # внутри сборки нужны и *.pyd/*.pyc: без них приложение не запустится
 !dist/OpenCodeProviderManager/**
+# портативная однофайловая сборка
+!dist/OpenCodeProviderManager.exe
