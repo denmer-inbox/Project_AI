@@ -1823,17 +1823,21 @@ class App:
         tk.Label(title_box, text="ПРОВАЙДЕРЫ И МОДЕЛИ", bg=T.bg, fg=T.ink_dim,
                  font=T.mono_small).pack(anchor="w")
 
+        # путь к конфигу и кнопки — на одной сетке, кнопки выровнены по полю ввода
         path_box = tk.Frame(header, bg=T.bg)
         path_box.pack(side="left", fill="x", expand=True, padx=8)
         tk.Label(path_box, text="КОНФИГУРАЦИЯ", bg=T.bg, fg=T.ink_dim,
-                 font=T.mono_small).pack(anchor="w")
+                 font=T.mono_small).grid(row=0, column=0, columnspan=3, sticky="w")
         self.var_path = tk.StringVar(value=str(self.config_path))
-        ttk.Entry(path_box, textvariable=self.var_path, font=T.mono).pack(
-            fill="x", pady=(2, 0))
-        btns = tk.Frame(header, bg=T.bg)
-        btns.pack(side="right", padx=(8, 2))
-        ttk.Button(btns, text="ОТКРЫТЬ ПАПКУ", command=self._open_folder).pack(side="left", padx=3)
-        ttk.Button(btns, text="ПЕРЕЗАГРУЗИТЬ", command=self.load).pack(side="left", padx=3)
+        self.path_entry = ttk.Entry(path_box, textvariable=self.var_path, font=T.mono)
+        self.path_entry.grid(row=1, column=0, sticky="ew", pady=(2, 0))
+        ttk.Button(path_box, text="ОТКРЫТЬ ПАПКУ",
+                   command=self._open_folder).grid(row=1, column=1, padx=(8, 3), pady=(2, 0),
+                                                   sticky="nsew")
+        ttk.Button(path_box, text="ПЕРЕЗАГРУЗИТЬ",
+                   command=self.load).grid(row=1, column=2, padx=(3, 2), pady=(2, 0),
+                                           sticky="nsew")
+        path_box.columnconfigure(0, weight=1)
 
         ScanStrip(root, color=T.cyan).pack(fill="x", padx=16, pady=(6, 0))
 
