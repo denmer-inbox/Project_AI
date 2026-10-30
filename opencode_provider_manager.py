@@ -3022,8 +3022,7 @@ class AOSSettingsDialog(tk.Toplevel):
         self.app = app
         self.aos = aos
         self.title("НАСТРОЙКИ AOS")
-        self.geometry("580x640")
-        self.minsize(520, 580)
+        self.minsize(520, 560)
         self.configure(bg=T.bg)
         self.transient(app.root)
         self.grab_set()
@@ -3040,6 +3039,7 @@ class AOSSettingsDialog(tk.Toplevel):
         self.profile_vars = {}
 
         self._build()
+        self._fit_dialog()
         self.bind("<Escape>", lambda e: self.destroy())
         try:
             app.clipboard.bind_tree(self)
@@ -3157,6 +3157,22 @@ class AOSSettingsDialog(tk.Toplevel):
                    command=self._apply_and_close).pack(side="right", padx=4)
         ttk.Button(foot, text="СБРОСИТЬ ПОЛОЖЕНИЕ",
                    command=self._reset_position).pack(side="left", padx=4)
+
+    def _fit_dialog(self):
+        """Подгоняет окно так, чтобы все элементы и кнопки были видны."""
+        try:
+            self.update_idletasks()
+            need_w = max(560, self.winfo_reqwidth() + 8)
+            need_h = self.winfo_reqheight() + 8
+            sw = self.winfo_screenwidth()
+            sh = self.winfo_screenheight()
+            need_h = min(need_h, sh - 80)
+            x = max(20, (sw - need_w) // 2)
+            y = max(20, (sh - need_h) // 2)
+            self.geometry("%dx%d+%d+%d" % (need_w, need_h, x, y))
+            self.update_idletasks()
+        except Exception:
+            self.geometry("620x720")
 
     # --- профили ----------------------------------------------------------
     def _fill_profiles_list(self):
@@ -4260,8 +4276,82 @@ def hide_console():
         pass
 
 
+# ==========================================================================
+# Защита от двойного запуска (именованный mutex Windows)
+# ==========================================================================
+
+_SINGLE_INSTANCE_HANDLE = None
+_MUTEX_NAME = "Global\\OpenCodeProviderManager.SingleInstance"
+_FIND_WINDOW_TITLE = "OpenCode — менеджер провайдеров"
+
+
+def acquire_single_instance():
+    """Пытается стать единственным экземпляром.
+
+    Возвращает True, если это первый запуск; False — если приложение уже работает
+    (тогда активируем существующее окно и выходим).
+    """
+    global _SINGLE_INSTANCE_HANDLE
+    try:
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.windll.kernel32
+        kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL,
+                                          wintypes.LPCWSTR]
+        kernel32.CreateMutexW.restype = wintypes.HANDLE
+        handle = kernel32.CreateMutexW(None, True, _MUTEX_NAME)
+        kernel32.GetLastError.restype = wintypes.DWORD
+        last_error = int(kernel32.GetLastError())
+        ERROR_ALREADY_EXISTS = 183
+        if last_error == ERROR_ALREADY_EXISTS:
+            if handle:
+                kernel32.CloseHandle(handle)
+            return False
+        _SINGLE_INSTANCE_HANDLE = handle
+        return True
+    except Exception:
+        # без WinAPI просто разрешаем запуск
+        return True
+
+
+def activate_existing_window():
+    """Разворачивает окно уже запущенного экземпляра."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+        user32.FindWindowW.restype = wintypes.HWND
+        hwnd = user32.FindWindowW(None, _FIND_WINDOW_TITLE)
+        if not hwnd:
+            return False
+        SW_RESTORE = 9
+        user32.ShowWindow(wintypes.HWND(hwnd), SW_RESTORE)
+        user32.SetForegroundWindow(wintypes.HWND(hwnd))
+        return True
+    except Exception:
+        return False
+
+
+def notify_already_running():
+    """Сообщает, что приложение уже запущено (без Tk — окна может не быть)."""
+    try:
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(
+            None, "Менеджер OpenCode уже запущен.\n\n"
+                  "Окно приложения восстановлено.",
+            "OpenCode — менеджер провайдеров", 0x40)  # MB_ICONINFORMATION
+    except Exception:
+        pass
+
+
 def main():
     hide_console()
+    # единственный экземпляр: второй запуск просто развернёт уже открытое окно
+    if not acquire_single_instance():
+        if not activate_existing_window():
+            notify_already_running()
+        return 0
     notes = ensure_dependencies()
     app = App()
     if notes:

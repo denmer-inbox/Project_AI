@@ -2325,8 +2325,7 @@ class _a0(tk.Toplevel):
         self.app = app
         self.aos = aos
         self.title('НАСТРОЙКИ AOS')
-        self.geometry('580x640')
-        self.minsize(520, 580)
+        self.minsize(520, 560)
         self.configure(bg=_b.bg)
         self.transient(app.root)
         self.grab_set()
@@ -2341,6 +2340,7 @@ class _a0(tk.Toplevel):
         self._profiles_sel = list(aos.settings.get('profiles') or [])
         self.profile_vars = {}
         self._build()
+        self._fit_dialog()
         self.bind('<Escape>', lambda e: self.destroy())
         try:
             app.clipboard.bind_tree(self)
@@ -2408,6 +2408,21 @@ class _a0(tk.Toplevel):
         ttk.Button(foot, text='ЗАКРЫТЬ', command=self.destroy).pack(side='right', padx=4)
         ttk.Button(foot, text='ПРИМЕНИТЬ', style='Accent.TButton', command=self._apply_and_close).pack(side='right', padx=4)
         ttk.Button(foot, text='СБРОСИТЬ ПОЛОЖЕНИЕ', command=self._reset_position).pack(side='left', padx=4)
+
+    def _fit_dialog(self):
+        try:
+            self.update_idletasks()
+            need_w = max(560, self.winfo_reqwidth() + 8)
+            need_h = self.winfo_reqheight() + 8
+            sw = self.winfo_screenwidth()
+            sh = self.winfo_screenheight()
+            need_h = min(need_h, sh - 80)
+            x = max(20, (sw - need_w) // 2)
+            y = max(20, (sh - need_h) // 2)
+            self.geometry('%dx%d+%d+%d' % (need_w, need_h, x, y))
+            self.update_idletasks()
+        except Exception:
+            self.geometry('620x720')
 
     def _fill_profiles_list(self):
         for ch in list(self._checks_inner.winfo_children()):
@@ -3303,9 +3318,61 @@ def _a4():
             ctypes.windll.kernel32.FreeConsole()
     except Exception:
         pass
+_SINGLE_INSTANCE_HANDLE = None
+_MUTEX_NAME = 'Global\\OpenCodeProviderManager.SingleInstance'
+_FIND_WINDOW_TITLE = 'OpenCode — менеджер провайдеров'
+
+def _a5():
+    global _SINGLE_INSTANCE_HANDLE
+    try:
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.windll.kernel32
+        kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+        kernel32.CreateMutexW.restype = wintypes.HANDLE
+        handle = kernel32.CreateMutexW(None, True, _MUTEX_NAME)
+        kernel32.GetLastError.restype = wintypes.DWORD
+        last_error = int(kernel32.GetLastError())
+        ERROR_ALREADY_EXISTS = 183
+        if last_error == ERROR_ALREADY_EXISTS:
+            if handle:
+                kernel32.CloseHandle(handle)
+            return False
+        _SINGLE_INSTANCE_HANDLE = handle
+        return True
+    except Exception:
+        return True
+
+def _a6():
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+        user32.FindWindowW.restype = wintypes.HWND
+        hwnd = user32.FindWindowW(None, _FIND_WINDOW_TITLE)
+        if not hwnd:
+            return False
+        SW_RESTORE = 9
+        user32.ShowWindow(wintypes.HWND(hwnd), SW_RESTORE)
+        user32.SetForegroundWindow(wintypes.HWND(hwnd))
+        return True
+    except Exception:
+        return False
+
+def _a7():
+    try:
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(None, 'Менеджер OpenCode уже запущен.\n\nОкно приложения восстановлено.', 'OpenCode — менеджер провайдеров', 64)
+    except Exception:
+        pass
 
 def main():
     _a4()
+    if not _a5():
+        if not _a6():
+            _a7()
+        return 0
     notes = _a3()
     app = App()
     if notes:
