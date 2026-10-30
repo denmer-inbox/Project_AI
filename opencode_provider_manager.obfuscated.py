@@ -2190,14 +2190,21 @@ class _at:
         except Exception:
             pass
 
-    def _schedule_refresh(self):
+    def _schedule_refresh(self, immediate=True):
         if self.win is None or not self.win.winfo_exists():
             return
+        if self._after_id is not None:
+            try:
+                self.win.after_cancel(self._after_id)
+            except Exception:
+                pass
+            self._after_id = None
         sec = max(60, int(self.settings.get('refresh_sec', 60)))
-        try:
-            self.app.request_balance(silent=True)
-        except Exception:
-            pass
+        if immediate:
+            try:
+                self.app.request_balance(silent=True)
+            except Exception:
+                pass
         try:
             self._after_id = self.win.after(sec * 1000, self._tick)
         except Exception:
@@ -2205,8 +2212,7 @@ class _at:
 
     def _tick(self):
         self._after_id = None
-        self.refresh()
-        self._schedule_refresh()
+        self._schedule_refresh(immediate=True)
 
 def _au():
     candidates = []
@@ -2920,12 +2926,12 @@ class App:
                 messagebox.showinfo('Баланс', 'Выберите профиль в списке', parent=self.root)
             return
         if not silent:
-            self.lbl_balance_main.configure(text='ЗАГРУЗКА…', fg=_b.ink_dim)
-        self.lbl_balance_when.configure(text='запрос…')
-        try:
-            self.btn_balance_main.configure(state='disabled')
-        except Exception:
-            pass
+            try:
+                self.lbl_balance_main.configure(text='ЗАГРУЗКА…', fg=_b.ink_dim)
+                self.lbl_balance_when.configure(text='запрос…')
+                self.btn_balance_main.configure(state='disabled')
+            except Exception:
+                pass
         jobs = [(p['id'], p['base_url'], p['api_key']) for p in targets]
         self._balance_busy = True
         self._balance_pending = len(jobs)
@@ -2933,7 +2939,7 @@ class App:
         def work():
             for idx, (pid, url, key) in enumerate(jobs):
                 if idx:
-                    time.sleep(0.8)
+                    time.sleep(1.2)
                 try:
                     self._balance_results.put((pid, _u(url, key), None))
                 except Exception as exc:
@@ -2945,68 +2951,63 @@ class App:
         try:
             pid, data, err = self._balance_results.get_nowait()
         except queue.Empty:
-            pending = getattr(self, '_balance_pending', 0)
-            if pending <= 0:
+            if getattr(self, '_balance_pending', 0) <= 0:
                 self._balance_busy = False
-            self.root.after(120, self._poll_balance)
+                try:
+                    self.btn_balance_main.configure(state='normal')
+                except Exception:
+                    pass
+            else:
+                self.root.after(120, self._poll_balance)
             return
-        try:
-            self.btn_balance_main.configure(state='normal')
-        except Exception:
-            pass
         self._balance_pending = max(0, getattr(self, '_balance_pending', 1) - 1)
-        profile = self._find(pid)
-        if profile is None:
-            return
-        if err is not None:
-            self.lbl_balance_main.configure(text='нет данных', fg=_b.red)
-            self.lbl_balance_when.configure(text=str(err)[:70])
-            profile['_balance'] = None
-            profile['_balance_error'] = str(err)
-            self._log_balance_error(str(err))
-            try:
-                aos = getattr(self, 'aos', None)
-                if aos is not None and aos.win is not None and aos.win.winfo_exists():
-                    aos.refresh()
-            except Exception:
-                pass
-            if getattr(self, '_balance_pending', 0) > 0:
-                self.root.after(80, self._poll_balance)
-            return
-        profile['_balance'] = data
-        profile['_balance_error'] = None
-        profile['_balance_at'] = datetime.now()
         try:
-            aos = getattr(self, 'aos', None)
-            if aos is not None and aos.win is not None and aos.win.winfo_exists():
-                aos.refresh()
+            self._apply_balance_result(pid, data, err)
         except Exception:
             pass
         if getattr(self, '_balance_pending', 0) > 0:
             self.root.after(80, self._poll_balance)
-        if pid == self.selected:
-            self._show_balance(profile)
+        else:
+            self._balance_busy = False
+            try:
+                self.btn_balance_main.configure(state='normal')
+            except Exception:
+                pass
+
+    def _apply_balance_result(self, pid, data, err):
+        profile = self._find(pid)
+        if profile is not None:
+            if err is not None:
+                profile['_balance'] = None
+                profile['_balance_error'] = str(err)
+                self._log_balance_error('%s: %s' % (pid, err))
+            else:
+                profile['_balance'] = data
+                profile['_balance_error'] = None
+                profile['_balance_at'] = datetime.now()
             try:
                 aos = getattr(self, 'aos', None)
                 if aos is not None and aos.win is not None and aos.win.winfo_exists():
                     aos.refresh()
             except Exception:
                 pass
-        if err is not None and '429' in str(err):
-            return
-        if not profile.get('_balance') and (not profile.get('_balance_tried')):
-            profile['_balance_tried'] = True
-            self.root.after(250, self.request_balance)
+            if pid == self.selected:
+                try:
+                    if err is not None:
+                        self.lbl_balance_main.configure(text='нет данных', fg=_b.red)
+                        self.lbl_balance_when.configure(text=str(err)[:70])
+                    else:
+                        self._show_balance(profile)
+                except Exception:
+                    pass
 
     def _log_balance_error(self, text):
         try:
             base = Path(os.environ.get('LOCALAPPDATA') or Path.home())
             d = base / 'OpenCodeProviderManager'
             d.mkdir(parents=True, exist_ok=True)
-            log = d / 'balance_error.log'
-            stamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            with open(log, 'a', encoding='utf-8') as fh:
-                fh.write('[%s] %s\n' % (stamp, text))
+            with open(d / 'balance_error.log', 'a', encoding='utf-8') as fh:
+                fh.write('[%s] %s\n' % (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), text))
         except Exception:
             pass
 
