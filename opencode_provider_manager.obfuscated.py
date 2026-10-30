@@ -375,6 +375,8 @@ def _u(base_url: str, api_key: str) -> dict:
                 continue
             if status in (401, 403):
                 raise PermissionError('Сервер отклонил ключ (HTTP %s)' % status)
+            if status == 429:
+                raise RuntimeError('Рейт-лимит 429 — жду минуту')
             if status >= 400:
                 tried.append('%s: HTTP %s' % (url, status))
                 continue
@@ -1631,6 +1633,10 @@ class _ar:
     def _create(self):
         w = tk.Toplevel(self.app.root)
         self.win = w
+        try:
+            w.title('')
+        except Exception:
+            pass
         w.overrideredirect(True)
         try:
             w.attributes('-topmost', True)
@@ -1681,6 +1687,7 @@ class _ar:
         self.lbl_when = tk.Label(body, text='', bg=_b.panel_fill, fg=_b.ink_dim, font=font_small, anchor='w')
         self.lbl_when.pack(fill='x', padx=pad, pady=(0, pad))
         width = {'compact': 200, 'wide': 360}.get(preset, 280)
+        self.settings['_width'] = width
         body.update_idletasks()
         self._canvas.configure(width=width, height=max(70, body.winfo_reqheight()))
         self._draw_round(width, max(70, body.winfo_reqheight()))
@@ -1809,10 +1816,24 @@ class _ar:
                 self.lbl_when.configure(text=at.strftime('%H:%M:%S') if at else '')
             else:
                 self.lbl_value.configure(text='—', fg=_b.ink_dim)
-                self.lbl_est.configure(text=(err or '')[:36])
+                self.lbl_est.configure(text=self._fit_error(err))
                 self.lbl_when.configure(text='')
         except Exception:
             pass
+
+    def _fit_error(self, err):
+        if not err:
+            return ''
+        text = str(err).replace('\n', ' ')
+        for sep in ('Проверено:', 'Последние ошибки:', 'Проверен'):
+            if sep in text:
+                text = text.split(sep)[0]
+        text = text.strip().rstrip('.,;')
+        panel_w = int(self.settings.get('_width', 280))
+        width = max(16, (panel_w - 32) // 7)
+        if len(text) > width:
+            text = text[:width - 1].rstrip() + '…'
+        return text
 
     def _schedule_refresh(self):
         if self.win is None or not self.win.winfo_exists():
@@ -2375,6 +2396,7 @@ class App:
             self.lbl_balance_when.configure(text=str(err)[:70])
             profile['_balance'] = None
             profile['_balance_error'] = str(err)
+            self._log_balance_error(str(err))
             try:
                 aos = getattr(self, 'aos', None)
                 if aos is not None and aos.win is not None and aos.win.winfo_exists():
@@ -2393,9 +2415,23 @@ class App:
                     aos.refresh()
             except Exception:
                 pass
+        if err is not None and '429' in str(err):
+            return
         if not profile.get('_balance') and (not profile.get('_balance_tried')):
             profile['_balance_tried'] = True
             self.root.after(250, self.request_balance)
+
+    def _log_balance_error(self, text):
+        try:
+            base = Path(os.environ.get('LOCALAPPDATA') or Path.home())
+            d = base / 'OpenCodeProviderManager'
+            d.mkdir(parents=True, exist_ok=True)
+            log = d / 'balance_error.log'
+            stamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            with open(log, 'a', encoding='utf-8') as fh:
+                fh.write('[%s] %s\n' % (stamp, text))
+        except Exception:
+            pass
 
     def _show_balance(self, profile):
         data = profile.get('_balance')

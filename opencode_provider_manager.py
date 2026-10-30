@@ -521,6 +521,8 @@ def fetch_balance(base_url: str, api_key: str) -> dict:
                 continue
             if status in (401, 403):
                 raise PermissionError("Сервер отклонил ключ (HTTP %s)" % status)
+            if status == 429:
+                raise RuntimeError("Рейт-лимит 429 — жду минуту")
             if status >= 400:
                 tried.append("%s: HTTP %s" % (url, status))
                 continue
@@ -2142,6 +2144,10 @@ class AOSOverlay:
     def _create(self):
         w = tk.Toplevel(self.app.root)
         self.win = w
+        try:
+            w.title("")            # не показываемся в Alt+Tab / панели задач
+        except Exception:
+            pass
         w.overrideredirect(True)
         try:
             w.attributes("-topmost", True)
@@ -2203,6 +2209,7 @@ class AOSOverlay:
         self.lbl_when.pack(fill="x", padx=pad, pady=(0, pad))
 
         width = {"compact": 200, "wide": 360}.get(preset, 280)
+        self.settings["_width"] = width
         body.update_idletasks()
         self._canvas.configure(width=width, height=max(70, body.winfo_reqheight()))
         self._draw_round(width, max(70, body.winfo_reqheight()))
@@ -2353,10 +2360,27 @@ class AOSOverlay:
                 self.lbl_when.configure(text=at.strftime("%H:%M:%S") if at else "")
             else:
                 self.lbl_value.configure(text="—", fg=T.ink_dim)
-                self.lbl_est.configure(text=(err or "")[:36])
+                self.lbl_est.configure(text=self._fit_error(err))
                 self.lbl_when.configure(text="")
         except Exception:
             pass
+
+    def _fit_error(self, err):
+        """Короткий текст ошибки, гарантированно влезающий по ширине."""
+        if not err:
+            return ""
+        text = str(err).replace("\n", " ")
+        # убираем техническую часть с URL — она длинная и не нужна на оверлее
+        for sep in ("Проверено:", "Последние ошибки:", "Проверен"):
+            if sep in text:
+                text = text.split(sep)[0]
+        text = text.strip().rstrip(".,;")
+        # 280px панель, паддинги 28px, Consolas 9 ~7px/символ -> ~34 символа безопасно
+        panel_w = int(self.settings.get("_width", 280))
+        width = max(16, (panel_w - 32) // 7)
+        if len(text) > width:
+            text = text[:width - 1].rstrip() + "…"
+        return text
 
     def _schedule_refresh(self):
         if self.win is None or not self.win.winfo_exists():
@@ -3074,6 +3098,7 @@ class App:
             self.lbl_balance_when.configure(text=str(err)[:70])
             profile["_balance"] = None
             profile["_balance_error"] = str(err)
+            self._log_balance_error(str(err))
             try:
                 aos = getattr(self, "aos", None)
                 if aos is not None and aos.win is not None and aos.win.winfo_exists():
@@ -3093,9 +3118,25 @@ class App:
                     aos.refresh()
             except Exception:
                 pass
+        if err is not None and "429" in str(err):
+            # слишком частые запросы: не повторяем сразу, ждём следующий цикл AOS
+            return
         if not profile.get("_balance") and not profile.get("_balance_tried"):
             profile["_balance_tried"] = True
             self.root.after(250, self.request_balance)
+
+    def _log_balance_error(self, text):
+        """Пишет ошибку баланса в файл рядом с aos.json — для диагностики в собранном exe."""
+        try:
+            base = Path(os.environ.get("LOCALAPPDATA") or Path.home())
+            d = base / "OpenCodeProviderManager"
+            d.mkdir(parents=True, exist_ok=True)
+            log = d / "balance_error.log"
+            stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(log, "a", encoding="utf-8") as fh:
+                fh.write("[%s] %s\n" % (stamp, text))
+        except Exception:
+            pass
 
     def _show_balance(self, profile):
         data = profile.get("_balance")
