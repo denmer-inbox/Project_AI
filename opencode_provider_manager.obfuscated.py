@@ -1874,9 +1874,14 @@ class _at:
             else:
                 cw = max(geo_w, body.winfo_reqwidth())
             body.update_idletasks()
-            rb_h = rows_box.winfo_height() if rows_box is not None else 0
-            rb_y = rows_box.winfo_y() if rows_box is not None else 0
-            ch = max(rb_y + rb_h, body.winfo_height()) + 8
+            bottom = 0
+            for pair in getattr(self, '_row_labels', {}).values():
+                for widget in pair:
+                    try:
+                        bottom = max(bottom, widget.master.winfo_y() + widget.winfo_y() + widget.winfo_height())
+                    except Exception:
+                        pass
+            ch = bottom + 1 if bottom else max(body.winfo_height(), 30)
             if cw < 60 or ch < 30:
                 return
             width = int(cw) + 2
@@ -1958,7 +1963,7 @@ class _at:
         self._row_frames = []
         self._row_labels = {}
         self.rows_box = tk.Frame(body, bg=_b.panel_fill)
-        self.rows_box.pack(fill='x', padx=pad, pady=(0, pad))
+        self.rows_box.pack(fill='x', padx=pad, pady=0)
         self._row_font = font_small
         self._row_font_big = font_big
         self._rebuild_rows()
@@ -1993,13 +1998,7 @@ class _at:
     def _draw_round(self, w, h):
         c = self._canvas
         c.delete('bg')
-        r = 16
-        c.create_rectangle(r, 0, w - r, h, fill=_b.panel_fill, outline='', tags='bg')
-        c.create_rectangle(0, r, w, h - r, fill=_b.panel_fill, outline='', tags='bg')
-        for x1, y1, x2, y2, st in ((0, 0, 2 * r, 2 * r, 90), (w - 2 * r, 0, w, 2 * r, 0), (0, h - 2 * r, 2 * r, h, 180), (w - 2 * r, h - 2 * r, w, h, 270)):
-            c.create_arc(x1, y1, x2, y2, start=st, extent=90, style='arc', outline=_b.cyan_dim, tags='bg')
-        for x1, y1, x2, y2 in ((r, 0, w - r, 0), (r, h - 1, w - r, h - 1), (0, r, 0, h - r), (w - 1, r, w - 1, h - r)):
-            c.create_line(x1, y1, x2, y2, fill=_b.cyan_dim, tags='bg')
+        c.create_rectangle(0, 0, w, h, fill=_b.panel_fill, outline='', tags='bg')
         c.tag_lower('bg')
         c.coords(self._win_id, 0, 0)
 
@@ -2139,10 +2138,10 @@ class _at:
             if idx == 0:
                 self.lbl_state = tk.Label(name_line, text='●', bg=_b.panel_fill, fg=getattr(self, '_dot_color', _b.ink_dim), font=('Consolas', 9, 'bold'), bd=0, pady=0)
                 self.lbl_state.pack(side='right')
-            value = tk.Label(row, text='—', bg=_b.panel_fill, fg=_b.ink_dim, font=self._row_font_big, anchor='w')
-            value.pack(anchor='w')
-            est = tk.Label(row, text='', bg=_b.panel_fill, fg=_b.cyan_soft, font=self._row_font, anchor='w')
-            est.pack(anchor='w')
+            value = tk.Label(row, text='—', bg=_b.panel_fill, fg=_b.ink_dim, font=self._row_font_big, anchor='w', bd=0, pady=0)
+            value.pack(anchor='w', pady=0)
+            est = tk.Label(row, text='', bg=_b.panel_fill, fg=_b.cyan_soft, font=self._row_font, anchor='w', bd=0, pady=0)
+            est.pack(anchor='w', pady=0)
             self._row_labels[prof['id']] = (value, est)
 
     def _update_rows(self):
@@ -2466,6 +2465,23 @@ class _a0(tk.Toplevel):
             y = max(20, (sh - need_h) // 2)
             self.geometry('%dx%d+%d+%d' % (need_w, need_h, x, y))
             self.update_idletasks()
+            try:
+                parent = self.master
+                if parent is not None and parent.winfo_exists() and parent.winfo_viewable():
+                    pass
+                else:
+                    try:
+                        self.transient('')
+                    except Exception:
+                        pass
+                self.deiconify()
+                self.lift()
+                self.attributes('-topmost', True)
+                self.after(300, lambda: self.attributes('-topmost', False))
+                self.focus_force()
+                self.update_idletasks()
+            except Exception:
+                pass
         except Exception:
             self.geometry('620x720')
 
@@ -3164,7 +3180,27 @@ class App:
         if aos is None:
             messagebox.showerror('AOS', 'Не удалось создать оверлей', parent=self.root)
             return
-        _a0(self, aos)
+        try:
+            if self.root.state() != 'normal':
+                self.root.deiconify()
+            self.root.lift()
+            self.root.update_idletasks()
+            self.root.update()
+        except Exception:
+            pass
+        try:
+            dlg = _a0(self, aos)
+            try:
+                dlg.deiconify()
+                dlg.lift()
+                dlg.attributes('-topmost', True)
+                dlg.after(300, lambda: dlg.attributes('-topmost', False))
+                dlg.focus_force()
+                dlg.update()
+            except Exception:
+                pass
+        except Exception as exc:
+            messagebox.showerror('AOS', 'Не удалось открыть настройки:\n%s' % exc, parent=self.root)
 
     def _open_folder(self):
         try:
