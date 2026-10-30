@@ -2507,6 +2507,12 @@ class _a0(tk.Toplevel):
                 self.aos.apply_position()
             except Exception:
                 pass
+            try:
+                missing = [p for p in self.aos._visible_profiles() if not p.get('_balance')]
+                if missing:
+                    self.app.request_balance(silent=True, force=True)
+            except Exception:
+                pass
         self.aos.refresh()
         self.aos.apply_click_through()
         if prev_preset != s['preset']:

@@ -3277,6 +3277,14 @@ class AOSSettingsDialog(tk.Toplevel):
                 self.aos.apply_position()
             except Exception:
                 pass
+            # у новых профилей баланса ещё нет — запрашиваем
+            try:
+                missing = [p for p in self.aos._visible_profiles()
+                           if not p.get("_balance")]
+                if missing:
+                    self.app.request_balance(silent=True, force=True)
+            except Exception:
+                pass
 
         self.aos.refresh()
         self.aos.apply_click_through()
