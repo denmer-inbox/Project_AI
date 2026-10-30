@@ -3557,8 +3557,24 @@ class App:
         self._set_status("ЗАГРУЖЕНО ПРОФИЛЕЙ: %d   •   %s" % (len(self.profiles), path))
 
     def _signature(self) -> str:
+        """Отпечаток сохраняемых данных.
+
+        В подпись НЕ входят служебные поля (_balance, _balance_at, _raw и прочие
+        с префиксом «_»): они заполняются в процессе работы, из-за них индикатор
+        «есть несохранённые изменения» горел постоянно.
+        """
         try:
-            return json.dumps([self.config, self.profiles], sort_keys=True,
+            clean = [{"id": p.get("id"),
+                      "display_name": p.get("display_name"),
+                      "base_url": p.get("base_url"),
+                      "api_key": p.get("api_key"),
+                      "package": p.get("package"),
+                      "models": list(p.get("models") or []),
+                      "known_models": list(p.get("known_models") or []),
+                      "extra_settings": p.get("extra_settings") or {},
+                      "coefficient": p.get("coefficient")}
+                     for p in self.profiles]
+            return json.dumps([self.config, clean], sort_keys=True,
                               ensure_ascii=False, default=str)
         except Exception:
             return ""
@@ -3571,7 +3587,8 @@ class App:
         if lbl is None:
             return
         try:
-            lbl.configure(text="● ЕСТЬ НЕСОХРАНЁННЫЕ ИЗМЕНЕНИЯ" if self._is_dirty() else "")
+            dirty = self._is_dirty()
+            lbl.configure(text="● ЕСТЬ НЕСОХРАНЁННЫЕ ИЗМЕНЕНИЯ" if dirty else "")
         except Exception:
             pass
 
@@ -3878,6 +3895,11 @@ class App:
                 aos = getattr(self, "aos", None)
                 if aos is not None and aos.win is not None and aos.win.winfo_exists():
                     aos.refresh()
+            except Exception:
+                pass
+
+            try:
+                self._refresh_dirty_marker()
             except Exception:
                 pass
 
