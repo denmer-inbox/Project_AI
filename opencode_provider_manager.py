@@ -1861,11 +1861,13 @@ class TrayIcon:
                 try:
                     if msg == self.WM_TRAYICON:
                         low = int(lparam) & 0xFFFF
-                        if low in (self.WM_RBUTTONUP,):
+                        # ВАЖНО: на клик по значку только показываем меню и НИЧЕГО
+                        # не делаем с главным окном — иначе Windows перерисовывает
+                        # панель задач и значок «пропадает».
+                        if low in (self.WM_RBUTTONUP,
+                                   self.WM_LBUTTONUP,
+                                   self.WM_LBUTTONDBLCLK):
                             self._show_menu()
-                            return 0
-                        if low in (self.WM_LBUTTONUP, self.WM_LBUTTONDBLCLK):
-                            self.app.root.after(0, self._on_left_click)
                             return 0
                     if msg == 0x0010:  # WM_CLOSE
                         return 0
@@ -1984,24 +1986,31 @@ class TrayIcon:
 
     def _build_and_show_menu(self):
         import ctypes
-        from ctypes import wintypes
 
-        menu = tk.Menu(self.app.root, tearoff=0, bg=T.bg_panel_hi, fg=T.ink,
+        aos = getattr(self.app, "aos", None)
+        aos_visible = bool(aos and aos.win is not None and aos.win.winfo_exists())
+        root = self.app.root
+        win_shown = root.state() == "normal"
+
+        menu = tk.Menu(root, tearoff=0, bg=T.bg_panel_hi, fg=T.ink,
                        activebackground="#0b3547", activeforeground=T.cyan,
                        font=T.mono_small)
-        menu.add_command(label="ОТКРЫТЬ", command=self._on_left_click)
+        # --- AOS ---
+        menu.add_command(
+            label=("СКРЫТЬ AOS" if aos_visible else "ПОКАЗАТЬ AOS"),
+            command=self._toggle_aos_visible)
+        ct = bool(aos and aos.click_through)
+        menu.add_command(label=("✓ " if ct else "   ") + "КЛИКИ СКВОЗЬ AOS",
+                         command=self._toggle_aos_click)
         menu.add_separator()
-        aos_on = bool(getattr(self.app, "aos", None) and self.app.aos.enabled)
-        menu.add_command(label="AOS: " + ("ВЫКЛЮЧИТЬ" if aos_on else "ВКЛЮЧИТЬ"),
-                         command=self.app.toggle_aos)
+        # --- главное окно ---
+        menu.add_command(
+            label=("СВЕРНУТЬ ПРИЛОЖЕНИЕ" if win_shown else "РАЗВЕРНУТЬ ПРИЛОЖЕНИЕ"),
+            command=self._toggle_app_window)
+        menu.add_separator()
         menu.add_command(label="НАСТРОЙКИ AOS…", command=self.app.open_aos_settings)
-        ct = bool(getattr(self.app, "aos", None) and self.app.aos.click_through)
-        menu.add_command(label=("✓ " if ct else "") + "КЛИКИ СКВОЗЬ AOS",
-                         command=self.app.toggle_aos_click_through)
         menu.add_separator()
-        menu.add_command(label="ОБНОВИТЬ БАЛАНС", command=lambda: self.app.request_balance())
-        menu.add_separator()
-        menu.add_command(label="ВЫХОД", command=self.app.quit_app)
+        menu.add_command(label="ЗАКРЫТЬ ПРИЛОЖЕНИЕ", command=self.app.quit_app)
 
         x, y = self._cursor_pos()
         try:
@@ -2009,6 +2018,38 @@ class TrayIcon:
         finally:
             menu.grab_release()
         self._menu = menu
+
+    # --- действия меню ----------------------------------------------------
+    def _toggle_aos_visible(self):
+        aos = getattr(self.app, "aos", None) or self.app._aos()
+        if aos is None:
+            return
+        if aos.win is not None and aos.win.winfo_exists():
+            aos.hide()
+            aos.settings["enabled"] = False
+            save_aos_settings(aos.settings)
+        else:
+            aos.settings["enabled"] = True
+            save_aos_settings(aos.settings)
+            aos.show()
+        self.app._refresh_aos_button()
+
+    def _toggle_aos_click(self):
+        if getattr(self.app, "aos", None) is not None:
+            self.app.toggle_aos_click_through()
+
+    def _toggle_app_window(self):
+        root = self.app.root
+        if root.state() == "normal":
+            root.withdraw()
+        else:
+            root.deiconify()
+            root.lift()
+            root.focus_force()
+
+    def _on_left_click(self):
+        """Оставлено для совместимости — разворачивает окно и не трогает значок."""
+        self._toggle_app_window()
 
     def _cursor_pos(self):
         class POINT(ctypes.Structure):
@@ -2288,6 +2329,21 @@ class AOSOverlay:
         try:
             w.after(80, self.apply_click_through)
             w.after(300, self._poll_alt)
+        except Exception:
+            pass
+
+    def set_opacity(self, value):
+        """Меняет прозрачность окна на лету, без пересоздания содержимого."""
+        try:
+            value = max(0.25, min(1.0, float(value)))
+        except Exception:
+            return
+        self.settings["opacity"] = value
+        win = self.win
+        if win is None or not win.winfo_exists():
+            return
+        try:
+            win.attributes("-alpha", value)
         except Exception:
             pass
 
@@ -2738,7 +2794,13 @@ class AOSSettingsDialog(tk.Toplevel):
         self._choose_pos("top-right")
 
     def _apply_live(self):
+        """Применяет настройки на лету и БЕЗ пересоздания окна.
+
+        Перестройка содержимого вызывается только при смене размера (preset) —
+        иначе окно мигает при каждом движении ползунка.
+        """
         s = self.aos.settings
+        prev_preset = s.get("preset")
         s["preset"] = self.var_preset.get()
         s["opacity"] = round(float(self.var_opacity.get()), 2)
         s["refresh_sec"] = max(60, int(self.var_refresh.get()))
@@ -2746,12 +2808,21 @@ class AOSSettingsDialog(tk.Toplevel):
         s["show_coefficient"] = bool(self.var_coef.get())
         s["click_through"] = bool(self.var_click.get())
         save_aos_settings(s)
-        try:
-            if self.aos.win is not None and self.aos.win.winfo_exists():
-                self.aos.win.attributes("-alpha", s["opacity"])
-        except Exception:
-            pass
-        if self.aos.win is not None and self.aos.win.winfo_exists():
+
+        if self.aos.win is None or not self.aos.win.winfo_exists():
+            return
+
+        # 1) прозрачность — плавно, только через alpha
+        self.aos.set_opacity(s["opacity"])
+
+        # 2) показывать имя профиля / пересчёт — обновляем только текст
+        self.aos.refresh()
+
+        # 3) сквозной режим — только смена стилей, без перерисовки
+        self.aos.apply_click_through()
+
+        # 4) размер требует перестройки — только если он реально изменился
+        if prev_preset != s["preset"]:
             self.aos._build_content(self.aos.win)
             self.aos.apply_position()
             self.aos.refresh()
