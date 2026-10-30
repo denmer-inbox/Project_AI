@@ -1509,6 +1509,8 @@ class _am:
         aos_on = bool(getattr(self.app, 'aos', None) and self.app.aos.enabled)
         menu.add_command(label='AOS: ' + ('ВЫКЛЮЧИТЬ' if aos_on else 'ВКЛЮЧИТЬ'), command=self.app.toggle_aos)
         menu.add_command(label='НАСТРОЙКИ AOS…', command=self.app.open_aos_settings)
+        ct = bool(getattr(self.app, 'aos', None) and self.app.aos.click_through)
+        menu.add_command(label=('✓ ' if ct else '') + 'КЛИКИ СКВОЗЬ AOS', command=self.app.toggle_aos_click_through)
         menu.add_separator()
         menu.add_command(label='ОБНОВИТЬ БАЛАНС', command=lambda: self.app.request_balance())
         menu.add_separator()
@@ -1559,16 +1561,92 @@ def _an():
         except Exception:
             continue
     return None
+_CT_WNDPORC = {}
+GWL_EXSTYLE = -20
+WS_EX_LAYERED = 524288
+WS_EX_TRANSPARENT = 32
+WS_EX_TOOLWINDOW = 128
+WS_EX_NOACTIVATE = 134217728
+
+def _ao(hwnd, enabled: bool) -> bool:
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        LRESULT = ctypes.c_ssize_t
+        WNDPROC = ctypes.WINFUNCTYPE(LRESULT, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+        user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
+        user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
+        user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
+        user32.SetWindowLongPtrW.restype = ctypes.c_ssize_t
+        user32.CallWindowProcW.argtypes = [ctypes.c_ssize_t, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        user32.CallWindowProcW.restype = LRESULT
+        user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
+        user32.SetWindowPos.restype = wintypes.BOOL
+        GWL_EXSTYLE = -20
+        GWLP_WNDPROC = -4
+        WS_EX_LAYERED = 524288
+        WS_EX_TRANSPARENT = 32
+        WS_EX_TOOLWINDOW = 128
+        WS_EX_NOACTIVATE = 134217728
+        WM_NCHITTEST = 132
+        HTTRANSPARENT = -1
+        SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER = (2, 1, 4)
+        SWP_NOACTIVATE, SWP_FRAMECHANGED = (16, 32)
+        hwnd = wintypes.HWND(hwnd)
+        state = _CT_WNDPORC.setdefault(hwnd.value, {})
+        style = int(user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE))
+        style |= WS_EX_LAYERED | WS_EX_TOOLWINDOW
+        if enabled:
+            style |= WS_EX_TRANSPARENT | WS_EX_NOACTIVATE
+        else:
+            style &= ~WS_EX_TRANSPARENT
+            style &= ~WS_EX_NOACTIVATE
+        user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style)
+        if 'orig' not in state:
+
+            def make_proc(hwnd_value):
+
+                def proc(h_wnd, msg, wparam, lparam):
+                    if msg == WM_NCHITTEST:
+                        mode = _CT_WNDPORC.get(hwnd_value, {}).get('enabled', False)
+                        if mode:
+                            return HTTRANSPARENT
+                    orig = _CT_WNDPORC.get(hwnd_value, {}).get('orig', 0)
+                    if orig:
+                        return user32.CallWindowProcW(orig, h_wnd, msg, wparam, lparam)
+                    return 0
+                return WNDPROC(proc)
+            proc_ref = make_proc(hwnd.value)
+            old = user32.SetWindowLongPtrW(hwnd, GWLP_WNDPROC, ctypes.cast(proc_ref, ctypes.c_void_p).value)
+            state['orig'] = int(old or 0)
+            state['proc'] = proc_ref
+        state['enabled'] = bool(enabled)
+        user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED)
+        return True
+    except Exception:
+        return False
+
+def _ap(tk_window):
+    try:
+        import ctypes
+        tk_window.update_idletasks()
+        name = tk_window.wm_frame()
+        if isinstance(name, str) and name:
+            return int(name, 16)
+        return int(tk_window.winfo_id())
+    except Exception:
+        return 0
 AOS_POSITIONS = [('top-left', 'СВЕРХУ СЛЕВА'), ('top-center', 'СВЕРХУ ЦЕНТР'), ('top-right', 'СВЕРХУ СПРАВА'), ('mid-left', 'СЛЕВА ЦЕНТР'), ('mid-right', 'СПРАВА ЦЕНТР'), ('bottom-left', 'СНИЗУ СЛЕВА'), ('bottom-center', 'СНИЗУ ЦЕНТР'), ('bottom-right', 'СНИЗУ СПРАВА')]
 AOS_PRESETS = {'compact': 'КОМПАКТНЫЙ', 'normal': 'ОБЫЧНЫЙ', 'wide': 'ШИРОКИЙ'}
 
-def _ao() -> Path:
+def _aq() -> Path:
     base = Path(os.environ.get('LOCALAPPDATA') or Path.home())
     return base / 'OpenCodeProviderManager' / 'aos.json'
 
-def _ap() -> dict:
-    path = _ao()
-    defaults = {'enabled': False, 'position': 'top-right', 'preset': 'normal', 'opacity': 0.92, 'offset_x': 18, 'offset_y': 18, 'refresh_sec': 60, 'show_profile': True, 'show_coefficient': True}
+def _ar() -> dict:
+    path = _aq()
+    defaults = {'enabled': False, 'position': 'top-right', 'preset': 'normal', 'opacity': 0.92, 'offset_x': 18, 'offset_y': 18, 'refresh_sec': 60, 'show_profile': True, 'show_coefficient': True, 'click_through': True, 'always_visible': False}
     try:
         if path.exists():
             data = json.loads(path.read_text(encoding='utf-8-sig'))
@@ -1578,19 +1656,19 @@ def _ap() -> dict:
         pass
     return defaults
 
-def _aq(settings: dict) -> None:
-    path = _ao()
+def _as(settings: dict) -> None:
+    path = _aq()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(settings, indent=2, ensure_ascii=False), encoding='utf-8')
     except Exception:
         pass
 
-class _ar:
+class _at:
 
     def __init__(self, app):
         self.app = app
-        self.settings = _ap()
+        self.settings = _ar()
         self.win = None
         self._after_id = None
         self._drag = {'x': 0, 'y': 0}
@@ -1604,7 +1682,7 @@ class _ar:
         if enabled is None:
             enabled = not self.enabled
         self.settings['enabled'] = bool(enabled)
-        _aq(self.settings)
+        _as(self.settings)
         if enabled:
             self.show()
         else:
@@ -1620,6 +1698,14 @@ class _ar:
         self._create()
 
     def hide(self):
+        alt_id = getattr(self, '_alt_after', None)
+        if alt_id and self.win is not None:
+            try:
+                self.win.after_cancel(alt_id)
+            except Exception:
+                pass
+            self._alt_after = None
+        self._through_active = None
         if self._after_id and self.win is not None:
             try:
                 self.win.after_cancel(self._after_id)
@@ -1651,6 +1737,41 @@ class _ar:
         self.apply_position()
         self.refresh()
         self._schedule_refresh()
+        self.root_after = None
+        try:
+            w.after(80, self.apply_click_through)
+            w.after(300, self._poll_alt)
+        except Exception:
+            pass
+
+    @property
+    def click_through(self):
+        return bool(self.settings.get('click_through', True))
+
+    def apply_click_through(self, enabled=None):
+        if enabled is not None:
+            self.settings['click_through'] = bool(enabled)
+            _as(self.settings)
+        if self.win is None or not self.win.winfo_exists():
+            return False
+        hwnd = _ap(self.win)
+        if not hwnd:
+            return False
+        ok = _ao(hwnd, self.click_through)
+        try:
+            import ctypes
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+            parent = int(user32.GetParent(wintypes.HWND(hwnd)) or 0)
+            if parent:
+                _ao(parent, self.click_through)
+        except Exception:
+            pass
+        try:
+            self.lbl_hint.configure(text='сквозной режим · Alt — перетащить' if self.click_through else 'перетаскивание включено')
+        except Exception:
+            pass
+        return ok
 
     def _build_content(self, w):
         for child in w.winfo_children():
@@ -1685,7 +1806,9 @@ class _ar:
         self.lbl_est = tk.Label(body, text='', bg=_b.panel_fill, fg=_b.cyan_soft, font=font_small, anchor='w')
         self.lbl_est.pack(fill='x', padx=pad)
         self.lbl_when = tk.Label(body, text='', bg=_b.panel_fill, fg=_b.ink_dim, font=font_small, anchor='w')
-        self.lbl_when.pack(fill='x', padx=pad, pady=(0, pad))
+        self.lbl_when.pack(fill='x', padx=pad)
+        self.lbl_hint = tk.Label(body, text='', bg=_b.panel_fill, fg=_b.cyan_dim, font=('Consolas', 7), anchor='w')
+        self.lbl_hint.pack(fill='x', padx=pad, pady=(0, pad))
         width = {'compact': 200, 'wide': 360}.get(preset, 280)
         self.settings['_width'] = width
         body.update_idletasks()
@@ -1756,22 +1879,26 @@ class _ar:
             self.settings['manual_x'] = self.win.winfo_x()
             self.settings['manual_y'] = self.win.winfo_y()
             self.settings['position'] = 'manual'
-            _aq(self.settings)
+            _as(self.settings)
         except Exception:
             pass
 
     def set_position(self, key):
         self.settings['position'] = key
-        _aq(self.settings)
+        _as(self.settings)
         self.apply_position()
 
     def set_preset(self, key):
         self.settings['preset'] = key
-        _aq(self.settings)
+        _as(self.settings)
         if self.win is not None and self.win.winfo_exists():
             self._build_content(self.win)
             self.apply_position()
             self.refresh()
+
+    def toggle_click_through(self):
+        self.apply_click_through(not self.click_through)
+        return self.click_through
 
     def _context_menu(self, event):
         m = tk.Menu(self.win, tearoff=0, bg=_b.bg_panel_hi, fg=_b.ink, activebackground='#0b3547', activeforeground=_b.cyan, font=_b.mono_small)
@@ -1783,6 +1910,7 @@ class _ar:
         for key, title in AOS_PRESETS.items():
             m.add_command(label=title, command=lambda k=key: self.set_preset(k))
         m.add_separator()
+        m.add_command(label=('✓ ' if self.click_through else '') + 'КЛИКИ СКВОЗЬ ОВЕРЛЕЙ', command=self.toggle_click_through)
         m.add_command(label='ОБНОВИТЬ', command=self.refresh)
         m.add_command(label='ОТКРЫТЬ ОКНО', command=lambda: (self.app.root.deiconify(), self.app.root.lift()))
         m.add_command(label='СКРЫТЬ AOS', command=lambda: self.toggle(False))
@@ -1835,6 +1963,25 @@ class _ar:
             text = text[:width - 1].rstrip() + '…'
         return text
 
+    def _poll_alt(self):
+        if self.win is None or not self.win.winfo_exists():
+            return
+        try:
+            import ctypes
+            alt_down = bool(ctypes.windll.user32.GetAsyncKeyState(18) & 32768)
+        except Exception:
+            alt_down = False
+        want_through = self.click_through and (not alt_down)
+        if want_through != getattr(self, '_through_active', None):
+            self._through_active = want_through
+            hwnd = _ap(self.win)
+            if hwnd:
+                _ao(hwnd, want_through)
+        try:
+            self._alt_after = self.win.after(150, self._poll_alt)
+        except Exception:
+            pass
+
     def _schedule_refresh(self):
         if self.win is None or not self.win.winfo_exists():
             return
@@ -1853,7 +2000,7 @@ class _ar:
         self.refresh()
         self._schedule_refresh()
 
-class _as(tk.Toplevel):
+class _au(tk.Toplevel):
 
     def __init__(self, app, aos):
         super().__init__(app.root)
@@ -1872,6 +2019,7 @@ class _as(tk.Toplevel):
         self.var_profile = tk.BooleanVar(value=bool(aos.settings.get('show_profile', True)))
         self.var_coef = tk.BooleanVar(value=bool(aos.settings.get('show_coefficient', True)))
         self.var_enabled = tk.BooleanVar(value=bool(aos.settings.get('enabled', False)))
+        self.var_click = tk.BooleanVar(value=bool(aos.settings.get('click_through', True)))
         self._build()
         self.bind('<Escape>', lambda e: self.destroy())
         try:
@@ -1918,7 +2066,8 @@ class _as(tk.Toplevel):
         opts = tk.Frame(self, bg=_b.bg)
         opts.pack(fill='x', padx=16)
         ttk.Checkbutton(opts, text='имя профиля', variable=self.var_profile, command=self._apply_live).pack(side='left', padx=(2, 16))
-        ttk.Checkbutton(opts, text='пересчёт по коэффициенту', variable=self.var_coef, command=self._apply_live).pack(side='left')
+        ttk.Checkbutton(opts, text='пересчёт по коэффициенту', variable=self.var_coef, command=self._apply_live).pack(side='left', padx=(0, 16))
+        ttk.Checkbutton(opts, text='клики сквозь оверлей', variable=self.var_click, command=self._apply_live).pack(side='left')
         foot = tk.Frame(self, bg=_b.bg)
         foot.pack(fill='x', padx=16, pady=(16, 14), side='bottom')
         ttk.Button(foot, text='ЗАКРЫТЬ', command=self.destroy).pack(side='right', padx=4)
@@ -1955,7 +2104,8 @@ class _as(tk.Toplevel):
         s['refresh_sec'] = max(60, int(self.var_refresh.get()))
         s['show_profile'] = bool(self.var_profile.get())
         s['show_coefficient'] = bool(self.var_coef.get())
-        _aq(s)
+        s['click_through'] = bool(self.var_click.get())
+        _as(s)
         try:
             if self.aos.win is not None and self.aos.win.winfo_exists():
                 self.aos.win.attributes('-alpha', s['opacity'])
@@ -1965,6 +2115,7 @@ class _as(tk.Toplevel):
             self.aos._build_content(self.aos.win)
             self.aos.apply_position()
             self.aos.refresh()
+            self.aos.apply_click_through()
 
     def _apply_and_close(self):
         self._apply_live()
@@ -1986,7 +2137,7 @@ class App:
         self._build_root()
         self.load()
         try:
-            self.aos = _ar(self)
+            self.aos = _at(self)
             if self.aos.enabled:
                 self.root.after(600, self.aos.show)
         except Exception:
@@ -2507,7 +2658,7 @@ class App:
     def _aos(self):
         if getattr(self, 'aos', None) is None:
             try:
-                self.aos = _ar(self)
+                self.aos = _at(self)
             except Exception:
                 self.aos = None
         return self.aos
@@ -2531,12 +2682,19 @@ class App:
         except Exception:
             pass
 
+    def toggle_aos_click_through(self):
+        aos = self._aos()
+        if aos is None:
+            return
+        on = aos.toggle_click_through()
+        self._set_status('AOS: клики сквозь оверлей ВКЛ' if on else 'AOS: клики перехватываются оверлеем')
+
     def open_aos_settings(self):
         aos = self._aos()
         if aos is None:
             messagebox.showerror('AOS', 'Не удалось создать оверлей', parent=self.root)
             return
-        _as(self, aos)
+        _au(self, aos)
 
     def _open_folder(self):
         try:
@@ -2686,7 +2844,7 @@ class App:
     def run(self):
         self.root.mainloop()
 
-def _at(module: str) -> bool:
+def _av(module: str) -> bool:
     try:
         __import__(module)
         return True
@@ -2695,7 +2853,7 @@ def _at(module: str) -> bool:
 REQUIRED = {'certifi': ('certifi', 'актуальные корневые сертификаты для TLS')}
 OPTIONAL = {'PIL': ('Pillow', 'запасной захват экрана диагностики')}
 
-def _au(pkg: str) -> tuple[bool, str]:
+def _aw(pkg: str) -> tuple[bool, str]:
     import subprocess
     try:
         proc = subprocess.run([sys.executable, '-m', 'pip', 'install', '--user', '--upgrade', '--quiet', pkg], capture_output=True, text=True, timeout=240)
@@ -2706,17 +2864,17 @@ def _au(pkg: str) -> tuple[bool, str]:
     except Exception as exc:
         return (False, str(exc))
 
-def _av() -> list:
+def _ax() -> list:
     notes = []
-    if not _at('tkinter'):
+    if not _av('tkinter'):
         return ['tkinter не найден — переустановите Python с компонентом Tcl/Tk']
     needed = []
     for module, (pkg, why) in REQUIRED.items():
-        if not _at(module):
+        if not _av(module):
             needed.append((pkg, why))
     if getattr(sys, 'frozen', False):
         needed = []
-    if needed and (not _at('pip')):
+    if needed and (not _av('pip')):
         if getattr(sys, 'frozen', False):
             return notes
         try:
@@ -2724,19 +2882,19 @@ def _av() -> list:
             ensurepip.bootstrap()
         except Exception:
             pass
-    if needed and (not _at('pip')):
+    if needed and (not _av('pip')):
         notes.append('pip недоступен — автодогрузка невозможна (python -m ensurepip)')
         return notes
     for pkg, why in needed:
         notes.append('Догружаю %s — %s…' % (pkg, why))
-        ok, err = _au(pkg)
-        if ok and _at(pkg):
+        ok, err = _aw(pkg)
+        if ok and _av(pkg):
             notes.append('%s установлен' % pkg)
         else:
             notes.append('%s не установился: %s' % (pkg, err or 'неизвестная ошибка'))
     return notes
 
-def _aw():
+def _ay():
     if os.name != 'nt':
         return
     try:
@@ -2749,8 +2907,8 @@ def _aw():
         pass
 
 def main():
-    _aw()
-    notes = _av()
+    _ay()
+    notes = _ax()
     app = App()
     if notes:
         app._set_status('  •  '.join(notes))

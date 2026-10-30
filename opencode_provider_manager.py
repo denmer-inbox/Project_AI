@@ -1995,6 +1995,9 @@ class TrayIcon:
         menu.add_command(label="AOS: " + ("ВЫКЛЮЧИТЬ" if aos_on else "ВКЛЮЧИТЬ"),
                          command=self.app.toggle_aos)
         menu.add_command(label="НАСТРОЙКИ AOS…", command=self.app.open_aos_settings)
+        ct = bool(getattr(self.app, "aos", None) and self.app.aos.click_through)
+        menu.add_command(label=("✓ " if ct else "") + "КЛИКИ СКВОЗЬ AOS",
+                         command=self.app.toggle_aos_click_through)
         menu.add_separator()
         menu.add_command(label="ОБНОВИТЬ БАЛАНС", command=lambda: self.app.request_balance())
         menu.add_separator()
@@ -2050,6 +2053,115 @@ def find_icon_file():
     return None
 
 
+
+# Расширенные стили окна для «прозрачности для мыши»
+_CT_WNDPORC = {}
+
+GWL_EXSTYLE = -20
+WS_EX_LAYERED = 0x00080000
+WS_EX_TRANSPARENT = 0x00000020
+WS_EX_TOOLWINDOW = 0x00000080
+WS_EX_NOACTIVATE = 0x08000000
+
+
+def _set_click_through(hwnd, enabled: bool) -> bool:
+    """Включает/выключает прохождение кликов мыши сквозь окно.
+
+    WS_EX_TRANSPARENT работает только если окно возвращает HTTRANSPARENT на
+    WM_NCHITTEST. Tk перехватывает это сообщение ради собственного WM, поэтому
+    подменяем оконную процедуру и в нужном режиме отвечаем HTTRANSPARENT.
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        LRESULT = ctypes.c_ssize_t
+        WNDPROC = ctypes.WINFUNCTYPE(LRESULT, wintypes.HWND, wintypes.UINT,
+                                     wintypes.WPARAM, wintypes.LPARAM)
+        user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
+        user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
+        user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int,
+                                             ctypes.c_ssize_t]
+        user32.SetWindowLongPtrW.restype = ctypes.c_ssize_t
+        user32.CallWindowProcW.argtypes = [ctypes.c_ssize_t, wintypes.HWND,
+                                           wintypes.UINT, wintypes.WPARAM,
+                                           wintypes.LPARAM]
+        user32.CallWindowProcW.restype = LRESULT
+        user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND,
+                                        ctypes.c_int, ctypes.c_int,
+                                        ctypes.c_int, ctypes.c_int, wintypes.UINT]
+        user32.SetWindowPos.restype = wintypes.BOOL
+
+        GWL_EXSTYLE = -20
+        GWLP_WNDPROC = -4
+        WS_EX_LAYERED = 0x00080000
+        WS_EX_TRANSPARENT = 0x00000020
+        WS_EX_TOOLWINDOW = 0x00000080
+        WS_EX_NOACTIVATE = 0x08000000
+        WM_NCHITTEST = 0x0084
+        HTTRANSPARENT = -1
+        SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER = 0x0002, 0x0001, 0x0004
+        SWP_NOACTIVATE, SWP_FRAMECHANGED = 0x0010, 0x0020
+
+        hwnd = wintypes.HWND(hwnd)
+        state = _CT_WNDPORC.setdefault(hwnd.value, {})
+
+        # 1) расширенные стили
+        style = int(user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE))
+        style |= WS_EX_LAYERED | WS_EX_TOOLWINDOW
+        if enabled:
+            style |= WS_EX_TRANSPARENT | WS_EX_NOACTIVATE
+        else:
+            style &= ~WS_EX_TRANSPARENT
+            style &= ~WS_EX_NOACTIVATE
+        user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style)
+
+        # 2) подменяем оконную процедуру, чтобы отвечать HTTRANSPARENT
+        if "orig" not in state:
+            def make_proc(hwnd_value):
+                def proc(h_wnd, msg, wparam, lparam):
+                    if msg == WM_NCHITTEST:
+                        mode = _CT_WNDPORC.get(hwnd_value, {}).get("enabled", False)
+                        if mode:
+                            return HTTRANSPARENT
+                    orig = _CT_WNDPORC.get(hwnd_value, {}).get("orig", 0)
+                    if orig:
+                        return user32.CallWindowProcW(orig, h_wnd, msg,
+                                                      wparam, lparam)
+                    return 0
+                return WNDPROC(proc)
+
+            proc_ref = make_proc(hwnd.value)
+            old = user32.SetWindowLongPtrW(hwnd, GWLP_WNDPROC,
+                                           ctypes.cast(proc_ref, ctypes.c_void_p).value)
+            state["orig"] = int(old or 0)
+            state["proc"] = proc_ref   # держим ссылку, иначе GC убьёт колбэк
+
+        state["enabled"] = bool(enabled)
+
+        # 3) переприменяем, чтобы Windows учла стили
+        user32.SetWindowPos(hwnd, None, 0, 0, 0, 0,
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                            SWP_NOACTIVATE | SWP_FRAMECHANGED)
+        return True
+    except Exception:
+        return False
+
+
+def _hwnd_of(tk_window):
+    """Получает HWND окна Tk (Toplevel/Tk)."""
+    try:
+        import ctypes
+        tk_window.update_idletasks()
+        name = tk_window.wm_frame()
+        if isinstance(name, str) and name:
+            return int(name, 16)
+        return int(tk_window.winfo_id())
+    except Exception:
+        return 0
+
+
 # ==========================================================================
 # AOS — Always-On-Screen оверлей с балансом
 # ==========================================================================
@@ -2076,7 +2188,8 @@ def load_aos_settings() -> dict:
     path = aos_settings_path()
     defaults = {"enabled": False, "position": "top-right", "preset": "normal",
                 "opacity": 0.92, "offset_x": 18, "offset_y": 18,
-                "refresh_sec": 60, "show_profile": True, "show_coefficient": True}
+                "refresh_sec": 60, "show_profile": True, "show_coefficient": True,
+                "click_through": True, "always_visible": False}
     try:
         if path.exists():
             data = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -2131,6 +2244,14 @@ class AOSOverlay:
         self._create()
 
     def hide(self):
+        alt_id = getattr(self, "_alt_after", None)
+        if alt_id and self.win is not None:
+            try:
+                self.win.after_cancel(alt_id)
+            except Exception:
+                pass
+            self._alt_after = None
+        self._through_active = None
         if self._after_id and self.win is not None:
             try:
                 self.win.after_cancel(self._after_id)
@@ -2162,6 +2283,47 @@ class AOSOverlay:
         self.apply_position()
         self.refresh()
         self._schedule_refresh()
+        # сквозной режим: мышь работает с окнами под оверлеем
+        self.root_after = None
+        try:
+            w.after(80, self.apply_click_through)
+            w.after(300, self._poll_alt)
+        except Exception:
+            pass
+
+    @property
+    def click_through(self):
+        return bool(self.settings.get("click_through", True))
+
+    def apply_click_through(self, enabled=None):
+        """Применяет режим «мышь сквозь оверлей»."""
+        if enabled is not None:
+            self.settings["click_through"] = bool(enabled)
+            save_aos_settings(self.settings)
+        if self.win is None or not self.win.winfo_exists():
+            return False
+        hwnd = _hwnd_of(self.win)
+        if not hwnd:
+            return False
+        ok = _set_click_through(hwnd, self.click_through)
+        # у overrideredirect-окна Tk есть родитель-обёртка: стили нужны и ей
+        try:
+            import ctypes
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+            parent = int(user32.GetParent(wintypes.HWND(hwnd)) or 0)
+            if parent:
+                _set_click_through(parent, self.click_through)
+        except Exception:
+            pass
+        try:
+            # подсказка в самом оверлее: как перетащить, если включён сквозной режим
+            self.lbl_hint.configure(
+                text="сквозной режим · Alt — перетащить"
+                if self.click_through else "перетаскивание включено")
+        except Exception:
+            pass
+        return ok
 
     def _build_content(self, w):
         for child in w.winfo_children():
@@ -2206,7 +2368,10 @@ class AOSOverlay:
         self.lbl_est.pack(fill="x", padx=pad)
         self.lbl_when = tk.Label(body, text="", bg=T.panel_fill, fg=T.ink_dim,
                                  font=font_small, anchor="w")
-        self.lbl_when.pack(fill="x", padx=pad, pady=(0, pad))
+        self.lbl_when.pack(fill="x", padx=pad)
+        self.lbl_hint = tk.Label(body, text="", bg=T.panel_fill, fg=T.cyan_dim,
+                                 font=("Consolas", 7), anchor="w")
+        self.lbl_hint.pack(fill="x", padx=pad, pady=(0, pad))
 
         width = {"compact": 200, "wide": 360}.get(preset, 280)
         self.settings["_width"] = width
@@ -2311,6 +2476,10 @@ class AOSOverlay:
             self.apply_position()
             self.refresh()
 
+    def toggle_click_through(self):
+        self.apply_click_through(not self.click_through)
+        return self.click_through
+
     def _context_menu(self, event):
         m = tk.Menu(self.win, tearoff=0, bg=T.bg_panel_hi, fg=T.ink,
                     activebackground="#0b3547", activeforeground=T.cyan,
@@ -2323,6 +2492,9 @@ class AOSOverlay:
         for key, title in AOS_PRESETS.items():
             m.add_command(label=title, command=lambda k=key: self.set_preset(k))
         m.add_separator()
+        m.add_command(
+            label=("✓ " if self.click_through else "") + "КЛИКИ СКВОЗЬ ОВЕРЛЕЙ",
+            command=self.toggle_click_through)
         m.add_command(label="ОБНОВИТЬ", command=self.refresh)
         m.add_command(label="ОТКРЫТЬ ОКНО",
                       command=lambda: (self.app.root.deiconify(), self.app.root.lift()))
@@ -2382,6 +2554,26 @@ class AOSOverlay:
             text = text[:width - 1].rstrip() + "…"
         return text
 
+    def _poll_alt(self):
+        """Пока зажат Alt — оверлей ловит мышь (можно перетащить); отпустили — снова сквозной."""
+        if self.win is None or not self.win.winfo_exists():
+            return
+        try:
+            import ctypes
+            alt_down = bool(ctypes.windll.user32.GetAsyncKeyState(0x12) & 0x8000)
+        except Exception:
+            alt_down = False
+        want_through = self.click_through and not alt_down
+        if want_through != getattr(self, "_through_active", None):
+            self._through_active = want_through
+            hwnd = _hwnd_of(self.win)
+            if hwnd:
+                _set_click_through(hwnd, want_through)
+        try:
+            self._alt_after = self.win.after(150, self._poll_alt)
+        except Exception:
+            pass
+
     def _schedule_refresh(self):
         if self.win is None or not self.win.winfo_exists():
             return
@@ -2424,6 +2616,7 @@ class AOSSettingsDialog(tk.Toplevel):
         self.var_profile = tk.BooleanVar(value=bool(aos.settings.get("show_profile", True)))
         self.var_coef = tk.BooleanVar(value=bool(aos.settings.get("show_coefficient", True)))
         self.var_enabled = tk.BooleanVar(value=bool(aos.settings.get("enabled", False)))
+        self.var_click = tk.BooleanVar(value=bool(aos.settings.get("click_through", True)))
 
         self._build()
         self.bind("<Escape>", lambda e: self.destroy())
@@ -2507,6 +2700,8 @@ class AOSSettingsDialog(tk.Toplevel):
         ttk.Checkbutton(opts, text="имя профиля", variable=self.var_profile,
                         command=self._apply_live).pack(side="left", padx=(2, 16))
         ttk.Checkbutton(opts, text="пересчёт по коэффициенту", variable=self.var_coef,
+                        command=self._apply_live).pack(side="left", padx=(0, 16))
+        ttk.Checkbutton(opts, text="клики сквозь оверлей", variable=self.var_click,
                         command=self._apply_live).pack(side="left")
 
         # кнопки
@@ -2549,6 +2744,7 @@ class AOSSettingsDialog(tk.Toplevel):
         s["refresh_sec"] = max(60, int(self.var_refresh.get()))
         s["show_profile"] = bool(self.var_profile.get())
         s["show_coefficient"] = bool(self.var_coef.get())
+        s["click_through"] = bool(self.var_click.get())
         save_aos_settings(s)
         try:
             if self.aos.win is not None and self.aos.win.winfo_exists():
@@ -2559,6 +2755,7 @@ class AOSSettingsDialog(tk.Toplevel):
             self.aos._build_content(self.aos.win)
             self.aos.apply_position()
             self.aos.refresh()
+            self.aos.apply_click_through()
 
     def _apply_and_close(self):
         self._apply_live()
@@ -3246,6 +3443,14 @@ class App:
                           style="Accent.TButton" if on else "TButton")
         except Exception:
             pass
+
+    def toggle_aos_click_through(self):
+        aos = self._aos()
+        if aos is None:
+            return
+        on = aos.toggle_click_through()
+        self._set_status("AOS: клики сквозь оверлей ВКЛ" if on
+                         else "AOS: клики перехватываются оверлеем")
 
     def open_aos_settings(self):
         aos = self._aos()
