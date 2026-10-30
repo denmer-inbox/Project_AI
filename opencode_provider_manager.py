@@ -1858,16 +1858,17 @@ class TrayIcon:
             kernel32.GetModuleHandleW.restype = wintypes.HMODULE
 
             def wnd_proc(hwnd, msg, wparam, lparam):
+                # ВАЖНО: эта процедура вызывается из потока Windows, где Python-поток
+                # может быть не инициализирован. Любой вызов Tk отсюда валит процесс
+                # (Fatal Python error: PyEval_RestoreThread, GIL is NULL).
+                # Поэтому здесь ТОЛЬКО ставим событие, а окно/меню трогает главный поток.
                 try:
                     if msg == self.WM_TRAYICON:
                         low = int(lparam) & 0xFFFF
-                        # ВАЖНО: на клик по значку только показываем меню и НИЧЕГО
-                        # не делаем с главным окном — иначе Windows перерисовывает
-                        # панель задач и значок «пропадает».
                         if low in (self.WM_RBUTTONUP,
                                    self.WM_LBUTTONUP,
                                    self.WM_LBUTTONDBLCLK):
-                            self._show_menu()
+                            self._pending_menu = True
                             return 0
                     if msg == 0x0010:  # WM_CLOSE
                         return 0
@@ -1946,7 +1947,22 @@ class TrayIcon:
         ok = bool(self._shell32.Shell_NotifyIconW(self.NIM_ADD, ctypes.byref(nid)))
         self._nid = nid
         self._added = ok
+        self._pending_menu = False
+        self._start_menu_pump()
         return ok
+
+    def _start_menu_pump(self):
+        """Опрашивает флаг из оконной процедуры в главном потоке Tk."""
+        try:
+            if getattr(self, "_pending_menu", False):
+                self._pending_menu = False
+                self._build_and_show_menu()
+        except Exception:
+            pass
+        try:
+            self.app.root.after(120, self._start_menu_pump)
+        except Exception:
+            pass
 
     def set_tooltip(self, text):
         if not self._added:
@@ -1985,8 +2001,6 @@ class TrayIcon:
             pass
 
     def _build_and_show_menu(self):
-        import ctypes
-
         aos = getattr(self.app, "aos", None)
         aos_visible = bool(aos and aos.win is not None and aos.win.winfo_exists())
         root = self.app.root
@@ -2052,6 +2066,7 @@ class TrayIcon:
         self._toggle_app_window()
 
     def _cursor_pos(self):
+        import ctypes
         class POINT(ctypes.Structure):
             _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
         pt = POINT()

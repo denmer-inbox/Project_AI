@@ -1413,7 +1413,7 @@ class _am:
                     if msg == self.WM_TRAYICON:
                         low = int(lparam) & 65535
                         if low in (self.WM_RBUTTONUP, self.WM_LBUTTONUP, self.WM_LBUTTONDBLCLK):
-                            self._show_menu()
+                            self._pending_menu = True
                             return 0
                     if msg == 16:
                         return 0
@@ -1460,7 +1460,21 @@ class _am:
         ok = bool(self._shell32.Shell_NotifyIconW(self.NIM_ADD, ctypes.byref(nid)))
         self._nid = nid
         self._added = ok
+        self._pending_menu = False
+        self._start_menu_pump()
         return ok
+
+    def _start_menu_pump(self):
+        try:
+            if getattr(self, '_pending_menu', False):
+                self._pending_menu = False
+                self._build_and_show_menu()
+        except Exception:
+            pass
+        try:
+            self.app.root.after(120, self._start_menu_pump)
+        except Exception:
+            pass
 
     def set_tooltip(self, text):
         if not self._added:
@@ -1498,7 +1512,6 @@ class _am:
             pass
 
     def _build_and_show_menu(self):
-        import ctypes
         aos = getattr(self.app, 'aos', None)
         aos_visible = bool(aos and aos.win is not None and aos.win.winfo_exists())
         root = self.app.root
@@ -1551,6 +1564,7 @@ class _am:
         self._toggle_app_window()
 
     def _cursor_pos(self):
+        import ctypes
 
         class POINT(ctypes.Structure):
             _fields_ = [('x', ctypes.c_long), ('y', ctypes.c_long)]
