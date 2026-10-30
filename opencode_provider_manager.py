@@ -1780,6 +1780,768 @@ def install_clipboard(root):
 # Главное окно
 # ==========================================================================
 
+
+
+# ==========================================================================
+# Системный трей (Shell_NotifyIcon через ctypes, без внешних зависимостей)
+# ==========================================================================
+
+class TrayIcon:
+    """Иконка в системном трее Windows: меню по правому клику, скрытие/показ окна."""
+
+    WM_APP = 0x8000
+    WM_TRAYICON = WM_APP + 20
+    WM_LBUTTONUP = 0x0202
+    WM_RBUTTONUP = 0x0205
+    WM_LBUTTONDBLCLK = 0x0203
+    NIM_ADD = 0
+    NIM_MODIFY = 1
+    NIM_DELETE = 2
+    NIF_MESSAGE = 0x01
+    NIF_ICON = 0x02
+    NIF_TIP = 0x04
+    NIF_INFO = 0x10
+    NIIF_INFO = 0x01
+
+    def __init__(self, app, icon_path=None):
+        self.app = app
+        self.hwnd = None
+        self._hinst = None
+        self._hicon = None
+        self._added = False
+        self._menu_map = {}
+        self._menu = None
+        self.icon_path = icon_path
+        self._cls_name = "OCMTrayWnd"
+        self._wndproc_ref = None
+
+    # --- регистрация окна ------------------------------------------------
+    def install(self):
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            user32 = ctypes.windll.user32
+            kernel32 = ctypes.windll.kernel32
+            shell32 = ctypes.windll.shell32
+            self._user32 = user32
+            self._shell32 = shell32
+            self._wintypes = wintypes
+            self._hinst = kernel32.GetModuleHandleW(None)
+
+            WNDPROC = ctypes.WINFUNCTYPE(
+                ctypes.c_ssize_t, wintypes.HWND, wintypes.UINT,
+                wintypes.WPARAM, wintypes.LPARAM)
+            # правильные прототипы, иначе lparam переполняется при передаче в DefWindowProc
+            user32.DefWindowProcW.argtypes = [wintypes.HWND, wintypes.UINT,
+                                              wintypes.WPARAM, wintypes.LPARAM]
+            user32.DefWindowProcW.restype = ctypes.c_ssize_t
+            user32.CreateWindowExW.argtypes = [
+                wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD,
+                ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                wintypes.HWND, wintypes.HMENU, wintypes.HINSTANCE, wintypes.LPVOID]
+            user32.CreateWindowExW.restype = wintypes.HWND
+            user32.RegisterClassW.argtypes = [ctypes.c_void_p]
+            user32.RegisterClassW.restype = wintypes.ATOM
+            user32.GetCursorPos.argtypes = [ctypes.c_void_p]
+            user32.GetCursorPos.restype = wintypes.BOOL
+            user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+            user32.SetForegroundWindow.restype = wintypes.BOOL
+            user32.LoadImageW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR,
+                                          wintypes.UINT, ctypes.c_int, ctypes.c_int,
+                                          wintypes.UINT]
+            user32.LoadImageW.restype = wintypes.HANDLE
+            user32.LoadIconW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR]
+            user32.LoadIconW.restype = wintypes.HICON
+            kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+
+            def wnd_proc(hwnd, msg, wparam, lparam):
+                try:
+                    if msg == self.WM_TRAYICON:
+                        low = int(lparam) & 0xFFFF
+                        if low in (self.WM_RBUTTONUP,):
+                            self._show_menu()
+                            return 0
+                        if low in (self.WM_LBUTTONUP, self.WM_LBUTTONDBLCLK):
+                            self.app.root.after(0, self._on_left_click)
+                            return 0
+                    if msg == 0x0010:  # WM_CLOSE
+                        return 0
+                except Exception:
+                    pass
+                return int(user32.DefWindowProcW(hwnd, msg, wparam, lparam))
+
+            self._wndproc_ref = WNDPROC(wnd_proc)
+
+            class WNDCLASSW(ctypes.Structure):
+                _fields_ = [("style", wintypes.UINT),
+                            ("lpfnWndProc", WNDPROC),
+                            ("cbClsExtra", ctypes.c_int),
+                            ("cbWndExtra", ctypes.c_int),
+                            ("hInstance", wintypes.HINSTANCE),
+                            ("hIcon", wintypes.HICON),
+                            ("hCursor", wintypes.HANDLE),
+                            ("hbrBackground", wintypes.HBRUSH),
+                            ("lpszMenuName", wintypes.LPCWSTR),
+                            ("lpszClassName", wintypes.LPCWSTR)]
+
+            wc = WNDCLASSW()
+            wc.lpfnWndProc = self._wndproc_ref
+            wc.hInstance = self._hinst
+            wc.lpszClassName = self._cls_name
+            user32.RegisterClassW(ctypes.cast(ctypes.byref(wc), ctypes.c_void_p))
+
+            self.hwnd = user32.CreateWindowExW(
+                0, self._cls_name, "OCM Tray", 0, 0, 0, 0, 0,
+                None, None, self._hinst, None)
+            if not self.hwnd:
+                return False
+
+            # иконка: из .ico-файла, иначе стандартная
+            IMAGE_ICON = 1
+            LR_LOADFROMFILE = 0x0010
+            LR_DEFAULTSIZE = 0x0040
+            if self.icon_path and Path(self.icon_path).exists():
+                self._hicon = user32.LoadImageW(None, str(self.icon_path),
+                                                IMAGE_ICON, 0, 0,
+                                                LR_LOADFROMFILE | LR_DEFAULTSIZE)
+            if not self._hicon:
+                self._hicon = user32.LoadIconW(None, wintypes.LPCWSTR(32512))  # IDI_APPLICATION
+
+            return self._add_icon()
+        except Exception:
+            return False
+
+    def _add_icon(self):
+        import ctypes
+        from ctypes import wintypes
+
+        class NOTIFYICONDATAW(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.DWORD),
+                        ("hWnd", wintypes.HWND),
+                        ("uID", wintypes.UINT),
+                        ("uFlags", wintypes.UINT),
+                        ("uCallbackMessage", wintypes.UINT),
+                        ("hIcon", wintypes.HICON),
+                        ("szTip", wintypes.WCHAR * 128),
+                        ("dwState", wintypes.DWORD),
+                        ("dwStateMask", wintypes.DWORD),
+                        ("szInfo", wintypes.WCHAR * 256),
+                        ("uVersion", wintypes.UINT),
+                        ("szInfoTitle", wintypes.WCHAR * 64),
+                        ("dwInfoFlags", wintypes.DWORD)]
+
+        nid = NOTIFYICONDATAW()
+        nid.cbSize = ctypes.sizeof(NOTIFYICONDATAW)
+        nid.hWnd = self.hwnd
+        nid.uID = 1
+        nid.uFlags = self.NIF_MESSAGE | self.NIF_ICON | self.NIF_TIP
+        nid.uCallbackMessage = self.WM_TRAYICON
+        nid.hIcon = self._hicon
+        nid.szTip = "OpenCode — менеджер провайдеров"
+        ok = bool(self._shell32.Shell_NotifyIconW(self.NIM_ADD, ctypes.byref(nid)))
+        self._nid = nid
+        self._added = ok
+        return ok
+
+    def set_tooltip(self, text):
+        if not self._added:
+            return
+        import ctypes
+        self._nid.szTip = text[:127]
+        self._nid.uFlags = self.NIF_MESSAGE | self.NIF_ICON | self.NIF_TIP
+        try:
+            self._shell32.Shell_NotifyIconW(self.NIM_MODIFY, ctypes.byref(self._nid))
+        except Exception:
+            pass
+
+    def notify(self, title, text):
+        if not self._added:
+            return
+        import ctypes
+        try:
+            self._nid.uFlags = self.NIF_INFO
+            self._nid.szInfoTitle = title[:63]
+            self._nid.szInfo = text[:255]
+            self._nid.dwInfoFlags = self.NIIF_INFO
+            self._shell32.Shell_NotifyIconW(self.NIM_MODIFY, ctypes.byref(self._nid))
+        except Exception:
+            pass
+
+    # --- действия ---------------------------------------------------------
+    def _on_left_click(self):
+        self.app.root.deiconify()
+        self.app.root.lift()
+        self.app.root.focus_force()
+
+    def _show_menu(self):
+        try:
+            self.app.root.after(0, self._build_and_show_menu)
+        except Exception:
+            pass
+
+    def _build_and_show_menu(self):
+        import ctypes
+        from ctypes import wintypes
+
+        menu = tk.Menu(self.app.root, tearoff=0, bg=T.bg_panel_hi, fg=T.ink,
+                       activebackground="#0b3547", activeforeground=T.cyan,
+                       font=T.mono_small)
+        menu.add_command(label="ОТКРЫТЬ", command=self._on_left_click)
+        menu.add_separator()
+        aos_on = bool(getattr(self.app, "aos", None) and self.app.aos.enabled)
+        menu.add_command(label="AOS: " + ("ВЫКЛЮЧИТЬ" if aos_on else "ВКЛЮЧИТЬ"),
+                         command=self.app.toggle_aos)
+        menu.add_command(label="НАСТРОЙКИ AOS…", command=self.app.open_aos_settings)
+        menu.add_separator()
+        menu.add_command(label="ОБНОВИТЬ БАЛАНС", command=lambda: self.app.request_balance())
+        menu.add_separator()
+        menu.add_command(label="ВЫХОД", command=self.app.quit_app)
+
+        x, y = self._cursor_pos()
+        try:
+            menu.tk_popup(x, y)
+        finally:
+            menu.grab_release()
+        self._menu = menu
+
+    def _cursor_pos(self):
+        class POINT(ctypes.Structure):
+            _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+        pt = POINT()
+        ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+        ctypes.windll.user32.SetForegroundWindow(self.hwnd)
+        return pt.x, pt.y
+
+    def remove(self):
+        if not getattr(self, "_added", False):
+            return
+        try:
+            import ctypes
+            self._shell32.Shell_NotifyIconW(self.NIM_DELETE, ctypes.byref(self._nid))
+        except Exception:
+            pass
+        self._added = False
+
+
+def find_icon_file():
+    """Ищет opencode_manager.ico рядом с exe/скриптом (нужно и в собранном exe)."""
+    candidates = []
+    try:
+        if getattr(sys, "frozen", False):
+            base = Path(sys.executable).parent
+            candidates += [base / "opencode_manager.ico",
+                           base / "_internal" / "opencode_manager.ico"]
+            meipass = getattr(sys, "_MEIPASS", None)
+            if meipass:
+                candidates.append(Path(meipass) / "opencode_manager.ico")
+        candidates.append(Path(__file__).resolve().parent / "opencode_manager.ico")
+        candidates.append(Path.cwd() / "opencode_manager.ico")
+    except Exception:
+        pass
+    for c in candidates:
+        try:
+            if c.exists():
+                return c
+        except Exception:
+            continue
+    return None
+
+
+# ==========================================================================
+# AOS — Always-On-Screen оверлей с балансом
+# ==========================================================================
+
+AOS_POSITIONS = [
+    ("top-left", "СВЕРХУ СЛЕВА"),
+    ("top-center", "СВЕРХУ ЦЕНТР"),
+    ("top-right", "СВЕРХУ СПРАВА"),
+    ("mid-left", "СЛЕВА ЦЕНТР"),
+    ("mid-right", "СПРАВА ЦЕНТР"),
+    ("bottom-left", "СНИЗУ СЛЕВА"),
+    ("bottom-center", "СНИЗУ ЦЕНТР"),
+    ("bottom-right", "СНИЗУ СПРАВА"),
+]
+AOS_PRESETS = {"compact": "КОМПАКТНЫЙ", "normal": "ОБЫЧНЫЙ", "wide": "ШИРОКИЙ"}
+
+
+def aos_settings_path() -> Path:
+    base = Path(os.environ.get("LOCALAPPDATA") or Path.home())
+    return base / "OpenCodeProviderManager" / "aos.json"
+
+
+def load_aos_settings() -> dict:
+    path = aos_settings_path()
+    defaults = {"enabled": False, "position": "top-right", "preset": "normal",
+                "opacity": 0.92, "offset_x": 18, "offset_y": 18,
+                "refresh_sec": 60, "show_profile": True, "show_coefficient": True}
+    try:
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+            if isinstance(data, dict):
+                defaults.update({k: v for k, v in data.items() if k in defaults})
+    except Exception:
+        pass
+    return defaults
+
+
+def save_aos_settings(settings: dict) -> None:
+    path = aos_settings_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(settings, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
+class AOSOverlay:
+    """Плавающее окно поверх всех окон: баланс выбранного провайдера."""
+
+    def __init__(self, app):
+        self.app = app
+        self.settings = load_aos_settings()
+        self.win = None
+        self._after_id = None
+        self._drag = {"x": 0, "y": 0}
+        self._manual_pos = None
+
+    @property
+    def enabled(self):
+        return bool(self.settings.get("enabled", False))
+
+    def toggle(self, enabled=None):
+        if enabled is None:
+            enabled = not self.enabled
+        self.settings["enabled"] = bool(enabled)
+        save_aos_settings(self.settings)
+        if enabled:
+            self.show()
+        else:
+            self.hide()
+
+    def show(self):
+        if self.win is not None and self.win.winfo_exists():
+            self.win.deiconify()
+            self.win.lift()
+            self.apply_position()
+            self.refresh()
+            return
+        self._create()
+
+    def hide(self):
+        if self._after_id and self.win is not None:
+            try:
+                self.win.after_cancel(self._after_id)
+            except Exception:
+                pass
+        self._after_id = None
+        if self.win is not None and self.win.winfo_exists():
+            self.win.destroy()
+        self.win = None
+
+    def _create(self):
+        w = tk.Toplevel(self.app.root)
+        self.win = w
+        w.overrideredirect(True)
+        try:
+            w.attributes("-topmost", True)
+        except Exception:
+            pass
+        try:
+            w.attributes("-alpha", float(self.settings.get("opacity", 0.92)))
+        except Exception:
+            pass
+        w.bind("<Escape>", lambda e: self.toggle(False))
+        self._build_content(w)
+        self.apply_position()
+        self.refresh()
+        self._schedule_refresh()
+
+    def _build_content(self, w):
+        for child in w.winfo_children():
+            child.destroy()
+        preset = self.settings.get("preset", "normal")
+        pad = 10 if preset == "compact" else 14
+        if preset == "compact":
+            font_big, font_small = ("Consolas", 12, "bold"), ("Consolas", 8)
+        elif preset == "wide":
+            font_big, font_small = ("Consolas", 16, "bold"), ("Consolas", 9)
+        else:
+            font_big, font_small = ("Consolas", 15, "bold"), ("Consolas", 9)
+
+        w.configure(bg=T.bg)
+        shell = tk.Frame(w, bg=T.bg)
+        shell.pack(fill="both", expand=True)
+        self._canvas = tk.Canvas(shell, bg=T.bg, highlightthickness=0, bd=0)
+        self._canvas.pack(fill="both", expand=True)
+        body = tk.Frame(self._canvas, bg=T.panel_fill)
+        self._win_id = self._canvas.create_window(0, 0, window=body, anchor="nw")
+
+        top = tk.Frame(body, bg=T.panel_fill)
+        top.pack(fill="x", padx=pad, pady=(pad, 2))
+        tk.Label(top, text="AOS", bg=T.panel_fill, fg=T.cyan,
+                 font=("Consolas", 10, "bold")).pack(side="left")
+        self.lbl_state = tk.Label(top, text="", bg=T.panel_fill, fg=T.ink_dim,
+                                  font=font_small)
+        self.lbl_state.pack(side="left", padx=(8, 0))
+        close = tk.Label(top, text="X", bg=T.panel_fill, fg=T.ink_dim, font=font_small,
+                         cursor="hand2")
+        close.pack(side="right")
+        close.bind("<Button-1>", lambda e: self.toggle(False))
+
+        self.lbl_profile = tk.Label(body, text="", bg=T.panel_fill, fg=T.ink_dim,
+                                    font=font_small, anchor="w")
+        self.lbl_profile.pack(fill="x", padx=pad)
+        self.lbl_value = tk.Label(body, text="—", bg=T.panel_fill, fg=T.green,
+                                  font=font_big, anchor="w")
+        self.lbl_value.pack(fill="x", padx=pad)
+        self.lbl_est = tk.Label(body, text="", bg=T.panel_fill, fg=T.cyan_soft,
+                                font=font_small, anchor="w")
+        self.lbl_est.pack(fill="x", padx=pad)
+        self.lbl_when = tk.Label(body, text="", bg=T.panel_fill, fg=T.ink_dim,
+                                 font=font_small, anchor="w")
+        self.lbl_when.pack(fill="x", padx=pad, pady=(0, pad))
+
+        width = {"compact": 200, "wide": 360}.get(preset, 280)
+        body.update_idletasks()
+        self._canvas.configure(width=width, height=max(70, body.winfo_reqheight()))
+        self._draw_round(width, max(70, body.winfo_reqheight()))
+        self._canvas.bind("<Configure>", lambda e: self._draw_round(e.width, e.height))
+
+        def bind_all(widget):
+            try:
+                widget.bind("<Button-1>", self._start_drag, add="+")
+                widget.bind("<B1-Motion>", self._drag_move, add="+")
+                widget.bind("<ButtonRelease-1>", self._end_drag, add="+")
+                widget.bind("<Button-3>", self._context_menu, add="+")
+                widget.bind("<MouseWheel>", lambda e: self.refresh(), add="+")
+            except Exception:
+                pass
+            for ch in widget.winfo_children():
+                bind_all(ch)
+
+        bind_all(w)
+        bind_all(body)
+
+    def _draw_round(self, w, h):
+        c = self._canvas
+        c.delete("bg")
+        r = 16
+        c.create_rectangle(r, 0, w - r, h, fill=T.panel_fill, outline="", tags="bg")
+        c.create_rectangle(0, r, w, h - r, fill=T.panel_fill, outline="", tags="bg")
+        for x1, y1, x2, y2, st in ((0, 0, 2 * r, 2 * r, 90), (w - 2 * r, 0, w, 2 * r, 0),
+                                   (0, h - 2 * r, 2 * r, h, 180),
+                                   (w - 2 * r, h - 2 * r, w, h, 270)):
+            c.create_arc(x1, y1, x2, y2, start=st, extent=90, style="arc",
+                         outline=T.cyan_dim, tags="bg")
+        for x1, y1, x2, y2 in ((r, 0, w - r, 0), (r, h - 1, w - r, h - 1),
+                               (0, r, 0, h - r), (w - 1, r, w - 1, h - r)):
+            c.create_line(x1, y1, x2, y2, fill=T.cyan_dim, tags="bg")
+        c.tag_lower("bg")
+        c.coords(self._win_id, 0, 0)
+
+    def apply_position(self):
+        if self.win is None or not self.win.winfo_exists():
+            return
+        self.win.update_idletasks()
+        ww = self.win.winfo_reqwidth()
+        wh = self.win.winfo_reqheight()
+        sw = self.win.winfo_screenwidth()
+        sh = self.win.winfo_screenheight()
+        ox = int(self.settings.get("offset_x", 18))
+        oy = int(self.settings.get("offset_y", 18))
+        pos = self.settings.get("position", "top-right")
+        if pos == "manual" and "manual_x" in self.settings:
+            self.win.geometry("%+d%+d" % (int(self.settings["manual_x"]),
+                                          int(self.settings["manual_y"])))
+            return
+        coords = {
+            "top-left": (ox, oy),
+            "top-center": ((sw - ww) // 2, oy),
+            "top-right": (sw - ww - ox, oy),
+            "mid-left": (ox, (sh - wh) // 2),
+            "mid-right": (sw - ww - ox, (sh - wh) // 2),
+            "bottom-left": (ox, sh - wh - oy - 40),
+            "bottom-center": ((sw - ww) // 2, sh - wh - oy - 40),
+            "bottom-right": (sw - ww - ox, sh - wh - oy - 40),
+        }
+        x, y = coords.get(pos, coords["top-right"])
+        self.win.geometry("%+d%+d" % (int(x), int(y)))
+
+    def _start_drag(self, event):
+        try:
+            self._drag["x"] = event.x_root - self.win.winfo_x()
+            self._drag["y"] = event.y_root - self.win.winfo_y()
+        except Exception:
+            pass
+
+    def _drag_move(self, event):
+        try:
+            self.win.geometry("%+d%+d" % (event.x_root - self._drag["x"],
+                                          event.y_root - self._drag["y"]))
+        except Exception:
+            pass
+
+    def _end_drag(self, event):
+        try:
+            self.settings["manual_x"] = self.win.winfo_x()
+            self.settings["manual_y"] = self.win.winfo_y()
+            self.settings["position"] = "manual"
+            save_aos_settings(self.settings)
+        except Exception:
+            pass
+
+    def set_position(self, key):
+        self.settings["position"] = key
+        save_aos_settings(self.settings)
+        self.apply_position()
+
+    def set_preset(self, key):
+        self.settings["preset"] = key
+        save_aos_settings(self.settings)
+        if self.win is not None and self.win.winfo_exists():
+            self._build_content(self.win)
+            self.apply_position()
+            self.refresh()
+
+    def _context_menu(self, event):
+        m = tk.Menu(self.win, tearoff=0, bg=T.bg_panel_hi, fg=T.ink,
+                    activebackground="#0b3547", activeforeground=T.cyan,
+                    font=T.mono_small)
+        m.add_command(label="— ПОЛОЖЕНИЕ —", state="disabled")
+        for key, title in AOS_POSITIONS:
+            m.add_command(label=title, command=lambda k=key: self.set_position(k))
+        m.add_separator()
+        m.add_command(label="— РАЗМЕР —", state="disabled")
+        for key, title in AOS_PRESETS.items():
+            m.add_command(label=title, command=lambda k=key: self.set_preset(k))
+        m.add_separator()
+        m.add_command(label="ОБНОВИТЬ", command=self.refresh)
+        m.add_command(label="ОТКРЫТЬ ОКНО",
+                      command=lambda: (self.app.root.deiconify(), self.app.root.lift()))
+        m.add_command(label="СКРЫТЬ AOS", command=lambda: self.toggle(False))
+        try:
+            m.tk_popup(event.x_root, event.y_root)
+        finally:
+            m.grab_release()
+
+    def refresh(self):
+        profile = self.app._find(self.app.selected) if self.app.selected else None
+        if not profile:
+            try:
+                self.lbl_profile.configure(text="нет профиля")
+                self.lbl_value.configure(text="—", fg=T.ink_dim)
+                self.lbl_est.configure(text="")
+            except Exception:
+                pass
+            return
+        data = profile.get("_balance")
+        err = profile.get("_balance_error")
+        try:
+            self.lbl_state.configure(text="●", fg=T.green if data else T.red)
+            if self.settings.get("show_profile", True):
+                self.lbl_profile.configure(
+                    text=str(profile.get("display_name") or profile["id"])[:28])
+            if data:
+                self.lbl_value.configure(text=data.get("text") or "—", fg=T.green)
+                coef = str(profile.get("coefficient") or "").strip()
+                est = coefficient_estimate(data.get("tokens"), coef) if (
+                    coef and self.settings.get("show_coefficient", True)) else {}
+                self.lbl_est.configure(
+                    text=("≈ %s при к=%s" % (est["text"], coef)) if est else "")
+                at = profile.get("_balance_at")
+                self.lbl_when.configure(text=at.strftime("%H:%M:%S") if at else "")
+            else:
+                self.lbl_value.configure(text="—", fg=T.ink_dim)
+                self.lbl_est.configure(text=(err or "")[:36])
+                self.lbl_when.configure(text="")
+        except Exception:
+            pass
+
+    def _schedule_refresh(self):
+        if self.win is None or not self.win.winfo_exists():
+            return
+        # баланс обновляется раз в минуту (минимум 60 секунд, чтобы не ловить 429)
+        sec = max(60, int(self.settings.get("refresh_sec", 60)))
+        try:
+            self.app.request_balance(silent=True)
+        except Exception:
+            pass
+        try:
+            self._after_id = self.win.after(sec * 1000, self._tick)
+        except Exception:
+            pass
+
+    def _tick(self):
+        self._after_id = None
+        self.refresh()
+        self._schedule_refresh()
+
+
+
+class AOSSettingsDialog(tk.Toplevel):
+    """Настройки AOS-оверлея: положение на экране, размер, прозрачность, обновление."""
+
+    def __init__(self, app, aos):
+        super().__init__(app.root)
+        self.app = app
+        self.aos = aos
+        self.title("НАСТРОЙКИ AOS")
+        self.geometry("560x600")
+        self.minsize(500, 540)
+        self.configure(bg=T.bg)
+        self.transient(app.root)
+        self.grab_set()
+
+        self.var_pos = tk.StringVar(value=aos.settings.get("position", "top-right"))
+        self.var_preset = tk.StringVar(value=aos.settings.get("preset", "normal"))
+        self.var_opacity = tk.DoubleVar(value=float(aos.settings.get("opacity", 0.92)))
+        self.var_refresh = tk.IntVar(value=int(aos.settings.get("refresh_sec", 60)))
+        self.var_profile = tk.BooleanVar(value=bool(aos.settings.get("show_profile", True)))
+        self.var_coef = tk.BooleanVar(value=bool(aos.settings.get("show_coefficient", True)))
+        self.var_enabled = tk.BooleanVar(value=bool(aos.settings.get("enabled", False)))
+
+        self._build()
+        self.bind("<Escape>", lambda e: self.destroy())
+        try:
+            app.clipboard.bind_tree(self)
+        except Exception:
+            pass
+
+    def _build(self):
+        head = tk.Frame(self, bg=T.bg)
+        head.pack(fill="x", padx=16, pady=(14, 2))
+        tk.Label(head, text="AOS · ВСЕГДА НА ЭКРАНЕ", bg=T.bg, fg=T.cyan,
+                 font=T.mono_title).pack(anchor="w")
+        ScanStrip(self, color=T.cyan).pack(fill="x", padx=16, pady=(4, 8))
+
+        # включение
+        row = tk.Frame(self, bg=T.bg)
+        row.pack(fill="x", padx=16, pady=4)
+        tk.Checkbutton(row, text="ПОКАЗЫВАТЬ AOS", variable=self.var_enabled,
+                       bg=T.bg, fg=T.ink, selectcolor=T.bg_input, activebackground=T.bg,
+                       activeforeground=T.cyan, font=T.mono_small, bd=0,
+                       command=self._toggle_enabled).pack(anchor="w")
+
+        # положение — сетка 3x3, как на экране
+        tk.Label(self, text="ПОЛОЖЕНИЕ НА ЭКРАНЕ", bg=T.bg, fg=T.ink_dim,
+                 font=T.mono_small).pack(anchor="w", padx=18, pady=(10, 2))
+        grid = tk.Frame(self, bg=T.bg)
+        grid.pack(padx=16)
+        layout = [
+            [("top-left", "СВЕРХУ\nСЛЕВА"), ("top-center", "СВЕРХУ\nЦЕНТР"), ("top-right", "СВЕРХУ\nСПРАВА")],
+            [("mid-left", "СЛЕВА\nЦЕНТР"), None, ("mid-right", "СПРАВА\nЦЕНТР")],
+            [("bottom-left", "СНИЗУ\nСЛЕВА"), ("bottom-center", "СНИЗУ\nЦЕНТР"), ("bottom-right", "СНИЗУ\nСПРАВА")],
+        ]
+        self._pos_buttons = {}
+        for r, row_items in enumerate(layout):
+            for c, item in enumerate(row_items):
+                if item is None:
+                    tk.Label(grid, text="·", bg=T.bg, fg=T.cyan_dim,
+                             font=T.mono_small, width=12, height=3).grid(row=r, column=c, padx=3, pady=3)
+                    continue
+                key, title = item
+                b = tk.Button(grid, text=title, bg=T.bg_panel_hi, fg=T.ink,
+                              activebackground="#0b3547", activeforeground=T.cyan,
+                              relief="flat", font=T.mono_small, width=12, height=3,
+                              command=lambda k=key: self._choose_pos(k))
+                b.grid(row=r, column=c, padx=3, pady=3)
+                self._pos_buttons[key] = b
+        self._refresh_pos_buttons()
+
+        # размер
+        tk.Label(self, text="РАЗМЕР", bg=T.bg, fg=T.ink_dim,
+                 font=T.mono_small).pack(anchor="w", padx=18, pady=(12, 2))
+        sizes = tk.Frame(self, bg=T.bg)
+        sizes.pack(fill="x", padx=16)
+        for key, title in AOS_PRESETS.items():
+            ttk.Radiobutton(sizes, text=title, value=key, variable=self.var_preset,
+                            command=self._apply_live).pack(side="left", padx=(2, 12))
+
+        # прозрачность
+        tk.Label(self, text="ПРОЗРАЧНОСТЬ", bg=T.bg, fg=T.ink_dim,
+                 font=T.mono_small).pack(anchor="w", padx=18, pady=(12, 0))
+        tk.Scale(self, from_=0.4, to=1.0, resolution=0.02, orient="horizontal",
+                 variable=self.var_opacity, bg=T.bg, fg=T.ink, troughcolor=T.bg_input,
+                 highlightthickness=0, font=T.mono_small, showvalue=True,
+                 command=lambda v: self._apply_live()).pack(fill="x", padx=18)
+
+        # частота обновления
+        tk.Label(self, text="ОБНОВЛЯТЬ БАЛАНС", bg=T.bg, fg=T.ink_dim,
+                 font=T.mono_small).pack(anchor="w", padx=18, pady=(8, 2))
+        freq = tk.Frame(self, bg=T.bg)
+        freq.pack(fill="x", padx=16)
+        for sec, title in ((60, "1 МИН"), (120, "2 МИН"), (300, "5 МИН"), (900, "15 МИН")):
+            ttk.Radiobutton(freq, text=title, value=sec, variable=self.var_refresh,
+                            command=self._apply_live).pack(side="left", padx=(2, 12))
+
+        # что показывать
+        tk.Label(self, text="СОДЕРЖИМОЕ", bg=T.bg, fg=T.ink_dim,
+                 font=T.mono_small).pack(anchor="w", padx=18, pady=(12, 2))
+        opts = tk.Frame(self, bg=T.bg)
+        opts.pack(fill="x", padx=16)
+        ttk.Checkbutton(opts, text="имя профиля", variable=self.var_profile,
+                        command=self._apply_live).pack(side="left", padx=(2, 16))
+        ttk.Checkbutton(opts, text="пересчёт по коэффициенту", variable=self.var_coef,
+                        command=self._apply_live).pack(side="left")
+
+        # кнопки
+        foot = tk.Frame(self, bg=T.bg)
+        foot.pack(fill="x", padx=16, pady=(16, 14), side="bottom")
+        ttk.Button(foot, text="ЗАКРЫТЬ", command=self.destroy).pack(side="right", padx=4)
+        ttk.Button(foot, text="ПРИМЕНИТЬ", style="Accent.TButton",
+                   command=self._apply_and_close).pack(side="right", padx=4)
+        ttk.Button(foot, text="СБРОСИТЬ ПОЛОЖЕНИЕ",
+                   command=self._reset_position).pack(side="left", padx=4)
+
+    # --- действия ---------------------------------------------------------
+    def _toggle_enabled(self):
+        self.aos.toggle(self.var_enabled.get())
+        self.app._refresh_aos_button()
+
+    def _choose_pos(self, key):
+        self.var_pos.set(key)
+        self.aos.set_position(key)
+        self._refresh_pos_buttons()
+
+    def _refresh_pos_buttons(self):
+        cur = self.var_pos.get()
+        for key, btn in self._pos_buttons.items():
+            try:
+                if key == cur:
+                    btn.configure(bg="#0b3547", fg=T.cyan, relief="flat")
+                else:
+                    btn.configure(bg=T.bg_panel_hi, fg=T.ink)
+            except Exception:
+                pass
+
+    def _reset_position(self):
+        self._choose_pos("top-right")
+
+    def _apply_live(self):
+        s = self.aos.settings
+        s["preset"] = self.var_preset.get()
+        s["opacity"] = round(float(self.var_opacity.get()), 2)
+        s["refresh_sec"] = max(60, int(self.var_refresh.get()))
+        s["show_profile"] = bool(self.var_profile.get())
+        s["show_coefficient"] = bool(self.var_coef.get())
+        save_aos_settings(s)
+        try:
+            if self.aos.win is not None and self.aos.win.winfo_exists():
+                self.aos.win.attributes("-alpha", s["opacity"])
+        except Exception:
+            pass
+        if self.aos.win is not None and self.aos.win.winfo_exists():
+            self.aos._build_content(self.aos.win)
+            self.aos.apply_position()
+            self.aos.refresh()
+
+    def _apply_and_close(self):
+        self._apply_live()
+        self.app._refresh_aos_button()
+        self.destroy()
+
+
 class App:
     def __init__(self):
         self.root_ready = True
@@ -1793,6 +2555,19 @@ class App:
         self._lang = "ru"
         self._build_root()
         self.load()
+        # AOS-оверлей: создаём лениво, но включаем, если так сохранено в настройках
+        try:
+            self.aos = AOSOverlay(self)
+            if self.aos.enabled:
+                self.root.after(600, self.aos.show)
+        except Exception:
+            self.aos = None
+        # иконка в системном трее
+        try:
+            self.tray = TrayIcon(self, icon_path=find_icon_file())
+            self.root.after(400, self._install_tray)
+        except Exception:
+            self.tray = None
 
     # --- окна -------------------------------------------------------------
     def _build_root(self):
@@ -1810,6 +2585,7 @@ class App:
             pass
         self.root.bind("<Control-z>", lambda e: self.undo_last())
         self.root.bind("<Control-Z>", lambda e: self.undo_last())
+        self.root.protocol("WM_DELETE_WINDOW", self._on_window_close)
 
     # --- построение интерфейса -------------------------------------------
     def _build(self):
@@ -1985,6 +2761,13 @@ class App:
                    command=self.export_profile).pack(side="left", padx=3)
         ttk.Button(row2, text="ИМПОРТ ПРОФИЛЕЙ…",
                    command=self.import_profile).pack(side="left", padx=3)
+        self.btn_aos = ttk.Button(row2, text="AOS: ВЫКЛ",
+                                  command=self.toggle_aos)
+        self.btn_aos.pack(side="left", padx=(12, 3))
+        ttk.Button(row2, text="НАСТРОЙКИ AOS…",
+                   command=self.open_aos_settings).pack(side="left", padx=3)
+        ttk.Button(row2, text="В ТРЕЙ",
+                   command=self.minimize_to_tray).pack(side="left", padx=(12, 3))
         self.hist_info = tk.Label(row2, text="Снимков: 0", bg=T.bg, fg=T.cyan_soft,
                                   font=T.mono_small, anchor="e")
         self.hist_info.pack(side="right", padx=(6, 10))
@@ -2247,14 +3030,16 @@ class App:
         return chosen["value"]
 
     # --- баланс профиля ---------------------------------------------------
-    def request_balance(self):
+    def request_balance(self, silent=False):
         if not hasattr(self, "_balance_results"):
             self._balance_results = queue.Queue()
         profile = self._find(self.selected) if self.selected else None
         if not profile:
-            messagebox.showinfo("Баланс", "Выберите профиль в списке", parent=self.root)
+            if not silent:
+                messagebox.showinfo("Баланс", "Выберите профиль в списке", parent=self.root)
             return
-        self.lbl_balance_main.configure(text="ЗАГРУЗКА…", fg=T.ink_dim)
+        if not silent:
+            self.lbl_balance_main.configure(text="ЗАГРУЗКА…", fg=T.ink_dim)
         self.lbl_balance_when.configure(text="запрос…")
         try:
             self.btn_balance_main.configure(state="disabled")
@@ -2289,12 +3074,25 @@ class App:
             self.lbl_balance_when.configure(text=str(err)[:70])
             profile["_balance"] = None
             profile["_balance_error"] = str(err)
+            try:
+                aos = getattr(self, "aos", None)
+                if aos is not None and aos.win is not None and aos.win.winfo_exists():
+                    aos.refresh()
+            except Exception:
+                pass
             return
         profile["_balance"] = data
         profile["_balance_error"] = None
         profile["_balance_at"] = datetime.now()
         if pid == self.selected:
             self._show_balance(profile)
+            # AOS тоже должен обновиться сразу после запроса
+            try:
+                aos = getattr(self, "aos", None)
+                if aos is not None and aos.win is not None and aos.win.winfo_exists():
+                    aos.refresh()
+            except Exception:
+                pass
         if not profile.get("_balance") and not profile.get("_balance_tried"):
             profile["_balance_tried"] = True
             self.root.after(250, self.request_balance)
@@ -2325,6 +3123,95 @@ class App:
                 self.lbl_balance_est_main.configure(text="")
         except Exception:
             pass
+
+    # --- трей ---------------------------------------------------------------
+    def _install_tray(self):
+        tray = getattr(self, "tray", None)
+        if tray is None:
+            return
+        try:
+            ok = tray.install()
+            self._tray_ok = bool(ok)
+            if ok:
+                self._set_status(self.status.cget("text") + "   •   в трее")
+        except Exception:
+            self._tray_ok = False
+
+    def minimize_to_tray(self):
+        """Свернуть окно в трей (окно скрывается, процесс живёт)."""
+        tray = getattr(self, "tray", None)
+        if tray is None or not getattr(self, "_tray_ok", False):
+            self.root.iconify()
+            return
+        self.root.withdraw()
+        try:
+            tray.notify("OpenCode — менеджер провайдеров",
+                        "Приложение свёрнуто в трей. Двойной клик — открыть.")
+        except Exception:
+            pass
+
+    def quit_app(self):
+        """Полный выход: убрать иконку из трея и закрыть приложение."""
+        tray = getattr(self, "tray", None)
+        if tray is not None:
+            try:
+                tray.remove()
+            except Exception:
+                pass
+        try:
+            aos = getattr(self, "aos", None)
+            if aos is not None:
+                aos.hide()
+        except Exception:
+            pass
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
+
+    def _on_window_close(self):
+        """Крестик: прячем в трей. Выход — через меню трея «ВЫХОД»."""
+        tray = getattr(self, "tray", None)
+        if tray is not None and getattr(self, "_tray_ok", False):
+            self.minimize_to_tray()
+        else:
+            self.quit_app()
+
+    # --- AOS ---------------------------------------------------------------
+    def _aos(self):
+        if getattr(self, "aos", None) is None:
+            try:
+                self.aos = AOSOverlay(self)
+            except Exception:
+                self.aos = None
+        return self.aos
+
+    def toggle_aos(self, enabled=None):
+        aos = self._aos()
+        if aos is None:
+            return
+        aos.toggle(enabled)
+        self._refresh_aos_button()
+        self._set_status("AOS ВКЛЮЧЁН" if aos.enabled else "AOS ВЫКЛЮЧЕН")
+
+    def _refresh_aos_button(self):
+        btn = getattr(self, "btn_aos", None)
+        aos = getattr(self, "aos", None)
+        if btn is None:
+            return
+        try:
+            on = bool(aos and aos.enabled)
+            btn.configure(text="AOS: ВКЛ" if on else "AOS: ВЫКЛ",
+                          style="Accent.TButton" if on else "TButton")
+        except Exception:
+            pass
+
+    def open_aos_settings(self):
+        aos = self._aos()
+        if aos is None:
+            messagebox.showerror("AOS", "Не удалось создать оверлей", parent=self.root)
+            return
+        AOSSettingsDialog(self, aos)
 
     def _open_folder(self):
         try:
