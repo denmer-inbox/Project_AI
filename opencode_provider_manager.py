@@ -2651,21 +2651,16 @@ class AOSOverlay:
             pass
 
     def _visible_profiles(self):
-        """Профили, баланс которых показывается: выбранные в настройках или текущий."""
+        """Профили для оверлея: отмеченные галочками; если ничего не отмечено — все."""
         want = list(self.settings.get("profiles") or [])
         if not want:
-            cur = self.app._find(self.app.selected) if self.app.selected else None
-            return [cur] if cur else []
+            return list(self.app.profiles)
         out = []
         for pid in want:
             prof = self.app._find(pid)
             if prof is not None:
                 out.append(prof)
-        if not out:
-            cur = self.app._find(self.app.selected) if self.app.selected else None
-            if cur:
-                out.append(cur)
-        return out
+        return out or list(self.app.profiles)
 
     def _rebuild_rows(self):
         """Пересоздаёт строки профилей (вызывается при смене состава/размера)."""
@@ -2794,16 +2789,201 @@ class AOSOverlay:
 
 
 
+
+
+def find_icon_file():
+    """Ищет opencode_manager.ico рядом с exe/скриптом (нужно и в собранном exe)."""
+    candidates = []
+    try:
+        if getattr(sys, "frozen", False):
+            base = Path(sys.executable).parent
+            candidates += [base / "opencode_manager.ico",
+                           base / "_internal" / "opencode_manager.ico"]
+            meipass = getattr(sys, "_MEIPASS", None)
+            if meipass:
+                candidates.append(Path(meipass) / "opencode_manager.ico")
+        candidates.append(Path(__file__).resolve().parent / "opencode_manager.ico")
+        candidates.append(Path.cwd() / "opencode_manager.ico")
+    except Exception:
+        pass
+    for c in candidates:
+        try:
+            if c.exists():
+                return c
+        except Exception:
+            continue
+    return None
+
+
+
+# Расширенные стили окна для «прозрачности для мыши»
+_CT_WNDPORC = {}
+
+GWL_EXSTYLE = -20
+WS_EX_LAYERED = 0x00080000
+WS_EX_TRANSPARENT = 0x00000020
+WS_EX_TOOLWINDOW = 0x00000080
+WS_EX_NOACTIVATE = 0x08000000
+
+
+def _set_click_through(hwnd, enabled: bool) -> bool:
+    """Включает/выключает прохождение кликов мыши сквозь окно.
+
+    WS_EX_TRANSPARENT работает только если окно возвращает HTTRANSPARENT на
+    WM_NCHITTEST. Tk перехватывает это сообщение ради собственного WM, поэтому
+    подменяем оконную процедуру и в нужном режиме отвечаем HTTRANSPARENT.
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        LRESULT = ctypes.c_ssize_t
+        WNDPROC = ctypes.WINFUNCTYPE(LRESULT, wintypes.HWND, wintypes.UINT,
+                                     wintypes.WPARAM, wintypes.LPARAM)
+        user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
+        user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
+        user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int,
+                                             ctypes.c_ssize_t]
+        user32.SetWindowLongPtrW.restype = ctypes.c_ssize_t
+        user32.CallWindowProcW.argtypes = [ctypes.c_ssize_t, wintypes.HWND,
+                                           wintypes.UINT, wintypes.WPARAM,
+                                           wintypes.LPARAM]
+        user32.CallWindowProcW.restype = LRESULT
+        user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND,
+                                        ctypes.c_int, ctypes.c_int,
+                                        ctypes.c_int, ctypes.c_int, wintypes.UINT]
+        user32.SetWindowPos.restype = wintypes.BOOL
+
+        GWL_EXSTYLE = -20
+        GWLP_WNDPROC = -4
+        WS_EX_LAYERED = 0x00080000
+        WS_EX_TRANSPARENT = 0x00000020
+        WS_EX_TOOLWINDOW = 0x00000080
+        WS_EX_NOACTIVATE = 0x08000000
+        WM_NCHITTEST = 0x0084
+        HTTRANSPARENT = -1
+        SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER = 0x0002, 0x0001, 0x0004
+        SWP_NOACTIVATE, SWP_FRAMECHANGED = 0x0010, 0x0020
+
+        hwnd = wintypes.HWND(hwnd)
+        state = _CT_WNDPORC.setdefault(hwnd.value, {})
+
+        # 1) расширенные стили
+        style = int(user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE))
+        style |= WS_EX_LAYERED | WS_EX_TOOLWINDOW
+        if enabled:
+            style |= WS_EX_TRANSPARENT | WS_EX_NOACTIVATE
+        else:
+            style &= ~WS_EX_TRANSPARENT
+            style &= ~WS_EX_NOACTIVATE
+        user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style)
+
+        # 2) подменяем оконную процедуру, чтобы отвечать HTTRANSPARENT
+        if "orig" not in state:
+            def make_proc(hwnd_value):
+                def proc(h_wnd, msg, wparam, lparam):
+                    if msg == WM_NCHITTEST:
+                        mode = _CT_WNDPORC.get(hwnd_value, {}).get("enabled", False)
+                        if mode:
+                            return HTTRANSPARENT
+                    orig = _CT_WNDPORC.get(hwnd_value, {}).get("orig", 0)
+                    if orig:
+                        return user32.CallWindowProcW(orig, h_wnd, msg,
+                                                      wparam, lparam)
+                    return 0
+                return WNDPROC(proc)
+
+            proc_ref = make_proc(hwnd.value)
+            old = user32.SetWindowLongPtrW(hwnd, GWLP_WNDPROC,
+                                           ctypes.cast(proc_ref, ctypes.c_void_p).value)
+            state["orig"] = int(old or 0)
+            state["proc"] = proc_ref   # держим ссылку, иначе GC убьёт колбэк
+
+        state["enabled"] = bool(enabled)
+
+        # 3) переприменяем, чтобы Windows учла стили
+        user32.SetWindowPos(hwnd, None, 0, 0, 0, 0,
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                            SWP_NOACTIVATE | SWP_FRAMECHANGED)
+        return True
+    except Exception:
+        return False
+
+
+def _hwnd_of(tk_window):
+    """Получает HWND окна Tk (Toplevel/Tk)."""
+    try:
+        import ctypes
+        tk_window.update_idletasks()
+        name = tk_window.wm_frame()
+        if isinstance(name, str) and name:
+            return int(name, 16)
+        return int(tk_window.winfo_id())
+    except Exception:
+        return 0
+
+
+# ==========================================================================
+# AOS — Always-On-Screen оверлей с балансом
+# ==========================================================================
+
+AOS_POSITIONS = [
+    ("top-left", "СВЕРХУ СЛЕВА"),
+    ("top-center", "СВЕРХУ ЦЕНТР"),
+    ("top-right", "СВЕРХУ СПРАВА"),
+    ("mid-left", "СЛЕВА ЦЕНТР"),
+    ("mid-right", "СПРАВА ЦЕНТР"),
+    ("bottom-left", "СНИЗУ СЛЕВА"),
+    ("bottom-center", "СНИЗУ ЦЕНТР"),
+    ("bottom-right", "СНИЗУ СПРАВА"),
+]
+AOS_PRESETS = {"compact": "КОМПАКТНЫЙ", "normal": "ОБЫЧНЫЙ", "wide": "ШИРОКИЙ"}
+
+
+def aos_settings_path() -> Path:
+    base = Path(os.environ.get("LOCALAPPDATA") or Path.home())
+    return base / "OpenCodeProviderManager" / "aos.json"
+
+
+def load_aos_settings() -> dict:
+    path = aos_settings_path()
+    defaults = {"enabled": False, "position": "top-right", "preset": "normal",
+                "opacity": 0.92, "offset_x": 18, "offset_y": 18,
+                "refresh_sec": 60, "show_profile": True, "show_coefficient": True,
+                "click_through": True, "always_visible": False,
+                "profiles": []}
+    try:
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+            if isinstance(data, dict):
+                defaults.update({k: v for k, v in data.items() if k in defaults})
+    except Exception:
+        pass
+    return defaults
+
+
+def save_aos_settings(settings: dict) -> None:
+    path = aos_settings_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(settings, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
+
+
 class AOSSettingsDialog(tk.Toplevel):
-    """Настройки AOS-оверлея: положение на экране, размер, прозрачность, обновление."""
+    """Настройки AOS-оверлея: положение, размер, прозрачность, профили, обновление."""
 
     def __init__(self, app, aos):
         super().__init__(app.root)
         self.app = app
         self.aos = aos
         self.title("НАСТРОЙКИ AOS")
-        self.geometry("560x600")
-        self.minsize(500, 540)
+        self.geometry("580x640")
+        self.minsize(520, 580)
         self.configure(bg=T.bg)
         self.transient(app.root)
         self.grab_set()
@@ -2817,6 +2997,7 @@ class AOSSettingsDialog(tk.Toplevel):
         self.var_enabled = tk.BooleanVar(value=bool(aos.settings.get("enabled", False)))
         self.var_click = tk.BooleanVar(value=bool(aos.settings.get("click_through", True)))
         self._profiles_sel = list(aos.settings.get("profiles") or [])
+        self.profile_vars = {}
 
         self._build()
         self.bind("<Escape>", lambda e: self.destroy())
@@ -2832,7 +3013,6 @@ class AOSSettingsDialog(tk.Toplevel):
                  font=T.mono_title).pack(anchor="w")
         ScanStrip(self, color=T.cyan).pack(fill="x", padx=16, pady=(4, 8))
 
-        # включение
         row = tk.Frame(self, bg=T.bg)
         row.pack(fill="x", padx=16, pady=4)
         tk.Checkbutton(row, text="ПОКАЗЫВАТЬ AOS", variable=self.var_enabled,
@@ -2840,22 +3020,24 @@ class AOSSettingsDialog(tk.Toplevel):
                        activeforeground=T.cyan, font=T.mono_small, bd=0,
                        command=self._toggle_enabled).pack(anchor="w")
 
-        # положение — сетка 3x3, как на экране
+        # положение — сетка 3x3
         tk.Label(self, text="ПОЛОЖЕНИЕ НА ЭКРАНЕ", bg=T.bg, fg=T.ink_dim,
                  font=T.mono_small).pack(anchor="w", padx=18, pady=(10, 2))
         grid = tk.Frame(self, bg=T.bg)
         grid.pack(padx=16)
         layout = [
-            [("top-left", "СВЕРХУ\nСЛЕВА"), ("top-center", "СВЕРХУ\nЦЕНТР"), ("top-right", "СВЕРХУ\nСПРАВА")],
+            [("top-left", "СВЕРХУ\nСЛЕВА"), ("top-center", "СВЕРХУ\nЦЕНТР"),
+             ("top-right", "СВЕРХУ\nСПРАВА")],
             [("mid-left", "СЛЕВА\nЦЕНТР"), None, ("mid-right", "СПРАВА\nЦЕНТР")],
-            [("bottom-left", "СНИЗУ\nСЛЕВА"), ("bottom-center", "СНИЗУ\nЦЕНТР"), ("bottom-right", "СНИЗУ\nСПРАВА")],
+            [("bottom-left", "СНИЗУ\nСЛЕВА"), ("bottom-center", "СНИЗУ\nЦЕНТР"),
+             ("bottom-right", "СНИЗУ\nСПРАВА")],
         ]
         self._pos_buttons = {}
         for r, row_items in enumerate(layout):
             for c, item in enumerate(row_items):
                 if item is None:
-                    tk.Label(grid, text="·", bg=T.bg, fg=T.cyan_dim,
-                             font=T.mono_small, width=12, height=3).grid(row=r, column=c, padx=3, pady=3)
+                    tk.Label(grid, text="·", bg=T.bg, fg=T.cyan_dim, font=T.mono_small,
+                             width=12, height=3).grid(row=r, column=c, padx=3, pady=3)
                     continue
                 key, title = item
                 b = tk.Button(grid, text=title, bg=T.bg_panel_hi, fg=T.ink,
@@ -2866,9 +3048,32 @@ class AOSSettingsDialog(tk.Toplevel):
                 self._pos_buttons[key] = b
         self._refresh_pos_buttons()
 
+        # профили — галочками
+        tk.Label(self, text="ПРОФИЛИ В ОВЕРЛЕЕ — отметьте нужные", bg=T.bg,
+                 fg=T.ink_dim, font=T.mono_small).pack(anchor="w", padx=18, pady=(10, 2))
+        prow = tk.Frame(self, bg=T.bg)
+        prow.pack(fill="x", padx=16)
+        box = tk.Frame(prow, bg=T.bg_input, highlightthickness=1,
+                       highlightbackground=T.line)
+        box.pack(side="left", fill="both", expand=True)
+        self._pcan = tk.Canvas(box, bg=T.bg_input, highlightthickness=0, bd=0, height=92)
+        self._pcan.pack(side="left", fill="both", expand=True)
+        psb = ttk.Scrollbar(box, orient="vertical", command=self._pcan.yview)
+        psb.pack(side="right", fill="y")
+        self._pcan.configure(yscrollcommand=psb.set)
+        self._checks_inner = tk.Frame(self._pcan, bg=T.bg_input)
+        self._pcan.create_window((0, 0), window=self._checks_inner, anchor="nw",
+                                 tags="inner")
+        self._checks_inner.bind(
+            "<Configure>",
+            lambda e: self._pcan.configure(scrollregion=self._pcan.bbox("all")))
+        self._pcan.bind(
+            "<Configure>", lambda e: self._pcan.itemconfigure("inner", width=e.width))
+        self._fill_profiles_list()
+
         # размер
         tk.Label(self, text="РАЗМЕР", bg=T.bg, fg=T.ink_dim,
-                 font=T.mono_small).pack(anchor="w", padx=18, pady=(12, 2))
+                 font=T.mono_small).pack(anchor="w", padx=18, pady=(10, 2))
         sizes = tk.Frame(self, bg=T.bg)
         sizes.pack(fill="x", padx=16)
         for key, title in AOS_PRESETS.items():
@@ -2877,81 +3082,64 @@ class AOSSettingsDialog(tk.Toplevel):
 
         # прозрачность
         tk.Label(self, text="ПРОЗРАЧНОСТЬ", bg=T.bg, fg=T.ink_dim,
-                 font=T.mono_small).pack(anchor="w", padx=18, pady=(12, 0))
+                 font=T.mono_small).pack(anchor="w", padx=18, pady=(8, 0))
         tk.Scale(self, from_=0.4, to=1.0, resolution=0.02, orient="horizontal",
                  variable=self.var_opacity, bg=T.bg, fg=T.ink, troughcolor=T.bg_input,
                  highlightthickness=0, font=T.mono_small, showvalue=True,
                  command=lambda v: self._apply_live()).pack(fill="x", padx=18)
 
-        # частота обновления
+        # частота
         tk.Label(self, text="ОБНОВЛЯТЬ БАЛАНС", bg=T.bg, fg=T.ink_dim,
-                 font=T.mono_small).pack(anchor="w", padx=18, pady=(8, 2))
+                 font=T.mono_small).pack(anchor="w", padx=18, pady=(6, 2))
         freq = tk.Frame(self, bg=T.bg)
         freq.pack(fill="x", padx=16)
-        for sec, title in ((60, "1 МИН"), (120, "2 МИН"), (300, "5 МИН"), (900, "15 МИН")):
+        for sec, title in ((60, "1 МИН"), (120, "2 МИН"), (300, "5 МИН"),
+                           (900, "15 МИН")):
             ttk.Radiobutton(freq, text=title, value=sec, variable=self.var_refresh,
                             command=self._apply_live).pack(side="left", padx=(2, 12))
 
-        # какие профили показывать
-        tk.Label(self, text="ПРОФИЛИ В ОВЕРЛЕЕ (несколько — Ctrl/Shift)",
-                 bg=T.bg, fg=T.ink_dim, font=T.mono_small).pack(anchor="w", padx=18,
-                                                                pady=(12, 2))
-        prow = tk.Frame(self, bg=T.bg)
-        prow.pack(fill="x", padx=16)
-        self.lst_profiles = tk.Listbox(
-            prow, selectmode="extended", height=4, bg=T.bg_input, fg=T.ink,
-            selectbackground="#0b3547", selectforeground=T.cyan,
-            font=T.mono_small, bd=0, highlightthickness=1,
-            highlightbackground=T.line, activestyle="none")
-        self.lst_profiles.pack(side="left", fill="x", expand=True)
-        psb = ttk.Scrollbar(prow, orient="vertical", command=self.lst_profiles.yview)
-        self.lst_profiles.configure(yscrollcommand=psb.set)
-        psb.pack(side="right", fill="y")
-        self._fill_profiles_list()
-
-        # что показывать
+        # содержимое
         tk.Label(self, text="СОДЕРЖИМОЕ", bg=T.bg, fg=T.ink_dim,
-                 font=T.mono_small).pack(anchor="w", padx=18, pady=(12, 2))
+                 font=T.mono_small).pack(anchor="w", padx=18, pady=(8, 2))
         opts = tk.Frame(self, bg=T.bg)
         opts.pack(fill="x", padx=16)
         ttk.Checkbutton(opts, text="имя профиля", variable=self.var_profile,
-                        command=self._apply_live).pack(side="left", padx=(2, 16))
+                        command=self._apply_live).pack(side="left", padx=(2, 14))
         ttk.Checkbutton(opts, text="пересчёт по коэффициенту", variable=self.var_coef,
-                        command=self._apply_live).pack(side="left", padx=(0, 16))
+                        command=self._apply_live).pack(side="left", padx=(0, 14))
         ttk.Checkbutton(opts, text="клики сквозь оверлей", variable=self.var_click,
                         command=self._apply_live).pack(side="left")
 
-        # кнопки
         foot = tk.Frame(self, bg=T.bg)
-        foot.pack(fill="x", padx=16, pady=(16, 14), side="bottom")
+        foot.pack(fill="x", padx=16, pady=(14, 12), side="bottom")
         ttk.Button(foot, text="ЗАКРЫТЬ", command=self.destroy).pack(side="right", padx=4)
         ttk.Button(foot, text="ПРИМЕНИТЬ", style="Accent.TButton",
                    command=self._apply_and_close).pack(side="right", padx=4)
         ttk.Button(foot, text="СБРОСИТЬ ПОЛОЖЕНИЕ",
                    command=self._reset_position).pack(side="left", padx=4)
 
+    # --- профили ----------------------------------------------------------
     def _fill_profiles_list(self):
-        try:
-            self.lst_profiles.delete(0, "end")
-            self._profile_ids = []
-            for prof in self.app.profiles:
-                pid = prof.get("id")
-                if not pid:
-                    continue
-                name = str(prof.get("display_name") or pid)
-                self.lst_profiles.insert("end", "%-22s %s" % (name[:22], prof.get("base_url", "")[:28]))
-                self._profile_ids.append(pid)
-            for idx, pid in enumerate(self._profile_ids):
-                if pid in self._profiles_sel:
-                    self.lst_profiles.selection_set(idx)
-        except Exception:
-            pass
+        for ch in list(self._checks_inner.winfo_children()):
+            ch.destroy()
+        self.profile_vars = {}
+        for prof in self.app.profiles:
+            pid = prof.get("id")
+            if not pid:
+                continue
+            name = str(prof.get("display_name") or pid)
+            var = tk.BooleanVar(value=pid in self._profiles_sel)
+            self.profile_vars[pid] = var
+            text = "%-18s  %s" % (name[:18], str(prof.get("base_url", ""))[:24])
+            cb = tk.Checkbutton(
+                self._checks_inner, text=text, variable=var, bg=T.bg_input, fg=T.ink,
+                selectcolor=T.bg_panel_hi, activebackground=T.bg_input,
+                activeforeground=T.cyan, font=T.mono_small, bd=0, anchor="w",
+                highlightthickness=0, command=self._apply_live)
+            cb.pack(fill="x", padx=4, pady=1)
 
     def _read_profiles_selection(self):
-        try:
-            return [self._profile_ids[i] for i in self.lst_profiles.curselection()]
-        except Exception:
-            return []
+        return [pid for pid, var in self.profile_vars.items() if bool(var.get())]
 
     # --- действия ---------------------------------------------------------
     def _toggle_enabled(self):
@@ -2968,7 +3156,7 @@ class AOSSettingsDialog(tk.Toplevel):
         for key, btn in self._pos_buttons.items():
             try:
                 if key == cur:
-                    btn.configure(bg="#0b3547", fg=T.cyan, relief="flat")
+                    btn.configure(bg="#0b3547", fg=T.cyan)
                 else:
                     btn.configure(bg=T.bg_panel_hi, fg=T.ink)
             except Exception:
@@ -2978,13 +3166,10 @@ class AOSSettingsDialog(tk.Toplevel):
         self._choose_pos("top-right")
 
     def _apply_live(self):
-        """Применяет настройки на лету и БЕЗ пересоздания окна.
-
-        Перестройка содержимого вызывается только при смене размера (preset) —
-        иначе окно мигает при каждом движении ползунка.
-        """
+        """Применяет настройки на лету: прозрачность не пересоздаёт окно."""
         s = self.aos.settings
         prev_preset = s.get("preset")
+        prev_profiles = list(s.get("profiles") or [])
         s["preset"] = self.var_preset.get()
         s["opacity"] = round(float(self.var_opacity.get()), 2)
         s["refresh_sec"] = max(60, int(self.var_refresh.get()))
@@ -2994,24 +3179,23 @@ class AOSSettingsDialog(tk.Toplevel):
         selected = self._read_profiles_selection()
         s["profiles"] = selected
         save_aos_settings(s)
-        try:
-            self.aos._rebuild_rows()
-        except Exception:
-            pass
 
         if self.aos.win is None or not self.aos.win.winfo_exists():
             return
 
-        # 1) прозрачность — плавно, только через alpha
         self.aos.set_opacity(s["opacity"])
 
-        # 2) показывать имя профиля / пересчёт — обновляем только текст
-        self.aos.refresh()
+        if selected != prev_profiles:
+            try:
+                self.aos._rebuild_rows()
+                self.aos.fit_to_content()
+                self.aos.apply_position()
+            except Exception:
+                pass
 
-        # 3) сквозной режим — только смена стилей, без перерисовки
+        self.aos.refresh()
         self.aos.apply_click_through()
 
-        # 4) размер требует перестройки — только если он реально изменился
         if prev_preset != s["preset"]:
             self.aos._build_content(self.aos.win)
             self.aos.apply_position()
