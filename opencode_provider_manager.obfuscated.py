@@ -1820,12 +1820,33 @@ class _at:
         try:
             body.update_idletasks()
             win.update_idletasks()
-            cw = body.winfo_reqwidth()
-            ch = body.winfo_reqheight()
+            cw = 0
+            rows_box = getattr(self, 'rows_box', None)
+            if rows_box is not None:
+                rows_box.update_idletasks()
+                cw = rows_box.winfo_reqwidth()
+            cw = max(cw, body.winfo_reqwidth())
+            try:
+                import tkinter.font as tkfont
+                f_small = tkfont.Font(font=self._row_font)
+                f_big = tkfont.Font(font=self._row_font_big)
+                need = 0
+                for pid, (val, est) in getattr(self, '_row_labels', {}).items():
+                    for widget, font in ((val, f_big), (est, f_small)):
+                        txt = widget.cget('text') or ''
+                        need = max(need, font.measure(txt))
+                cw = max(cw, need + 40)
+            except Exception:
+                pass
+            keep_w = max(int(getattr(self, '_keep_width', 0) or 0), int(getattr(self, '_last_fit_w', 0) or 0))
+            if keep_w and cw + 12 < keep_w:
+                cw = keep_w - 12
+            ch = max(body.winfo_reqheight(), rows_box.winfo_reqheight() if rows_box else 0)
             if cw < 40 or ch < 30:
                 return
             width = cw + 12
             height = ch + 4
+            self._last_fit_w = width
             self._canvas.configure(width=width, height=height)
             self._draw_round(width, height)
         except Exception:
@@ -2059,6 +2080,11 @@ class _at:
         for ch in box.winfo_children():
             ch.destroy()
         self._row_labels = {}
+        try:
+            if self.win is not None and self.win.winfo_exists():
+                self._keep_width = max(int(getattr(self, '_keep_width', 0) or 0), self.win.winfo_width())
+        except Exception:
+            pass
         profiles = self._visible_profiles()
         for idx, prof in enumerate(profiles):
             if idx:
@@ -2104,6 +2130,11 @@ class _at:
             else:
                 value.configure(text='—', fg=_b.ink_dim)
                 est.configure(text='нет данных')
+        try:
+            if self.win is not None and self.win.winfo_exists():
+                self.win.after_idle(self.fit_to_content)
+        except Exception:
+            pass
 
     def set_profiles(self, ids):
         self.settings['profiles'] = list(ids)
