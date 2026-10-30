@@ -29,6 +29,7 @@ import socket
 import ssl
 import sys
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -1865,10 +1866,15 @@ class TrayIcon:
                 try:
                     if msg == self.WM_TRAYICON:
                         low = int(lparam) & 0xFFFF
-                        if low in (self.WM_RBUTTONUP,
-                                   self.WM_LBUTTONUP,
-                                   self.WM_LBUTTONDBLCLK):
+                        if low == self.WM_RBUTTONUP:
                             self._pending_menu = True
+                            return 0
+                        if low == self.WM_LBUTTONDBLCLK:
+                            self._pending_dblclick = True
+                            return 0
+                        if low == self.WM_LBUTTONUP:
+                            # может стать двойным кликом — решает главный поток
+                            self._pending_single = True
                             return 0
                     if msg == 0x0010:  # WM_CLOSE
                         return 0
@@ -1948,19 +1954,43 @@ class TrayIcon:
         self._nid = nid
         self._added = ok
         self._pending_menu = False
+        self._pending_single = False
+        self._pending_dblclick = False
+        self._single_due = 0.0
         self._start_menu_pump()
         return ok
 
     def _start_menu_pump(self):
-        """Опрашивает флаг из оконной процедуры в главном потоке Tk."""
+        """Опрашивает флаги из оконной процедуры в главном потоке Tk.
+
+        Левый клик  — открыть меню (с задержкой, чтобы отличить двойной);
+        двойной левый — развернуть/свернуть окно программы;
+        правый клик — меню.
+        """
         try:
+            now = time.monotonic()
+
+            if getattr(self, "_pending_dblclick", False):
+                self._pending_dblclick = False
+                self._pending_single = False
+                self._single_due = 0.0
+                self.app.root.after(0, self._toggle_app_window)
+
+            elif getattr(self, "_pending_single", False):
+                self._pending_single = False
+                self._single_due = now + 0.35   # ждём возможный второй клик
+
+            if self._single_due and now >= self._single_due:
+                self._single_due = 0.0
+                self._build_and_show_menu()
+
             if getattr(self, "_pending_menu", False):
                 self._pending_menu = False
                 self._build_and_show_menu()
         except Exception:
             pass
         try:
-            self.app.root.after(120, self._start_menu_pump)
+            self.app.root.after(60, self._start_menu_pump)
         except Exception:
             pass
 
@@ -2245,7 +2275,8 @@ def load_aos_settings() -> dict:
     defaults = {"enabled": False, "position": "top-right", "preset": "normal",
                 "opacity": 0.92, "offset_x": 18, "offset_y": 18,
                 "refresh_sec": 60, "show_profile": True, "show_coefficient": True,
-                "click_through": True, "always_visible": False}
+                "click_through": True, "always_visible": False,
+                "profiles": []}
     try:
         if path.exists():
             data = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -2342,8 +2373,32 @@ class AOSOverlay:
         # сквозной режим: мышь работает с окнами под оверлеем
         self.root_after = None
         try:
+            w.after(60, self.fit_to_content)
+            w.after(140, self.fit_to_content)
             w.after(80, self.apply_click_through)
             w.after(300, self._poll_alt)
+        except Exception:
+            pass
+
+    def fit_to_content(self):
+        """Подгоняет окно оверлея точно под размер содержимого (после раскладки Tk)."""
+        win = self.win
+        if win is None or not win.winfo_exists():
+            return
+        body = getattr(self, "_body", None)
+        if body is None:
+            return
+        try:
+            body.update_idletasks()
+            win.update_idletasks()
+            cw = body.winfo_reqwidth()
+            ch = body.winfo_reqheight()
+            if cw < 40 or ch < 30:
+                return
+            width = cw + 12
+            height = ch + 4
+            self._canvas.configure(width=width, height=height)
+            self._draw_round(width, height)
         except Exception:
             pass
 
@@ -2390,8 +2445,8 @@ class AOSOverlay:
         try:
             # подсказка в самом оверлее: как перетащить, если включён сквозной режим
             self.lbl_hint.configure(
-                text="сквозной режим · Alt — перетащить"
-                if self.click_through else "перетаскивание включено")
+                text="сквозной · Alt = перетащить"
+                if self.click_through else "можно перетаскивать")
         except Exception:
             pass
         return ok
@@ -2414,41 +2469,37 @@ class AOSOverlay:
         self._canvas = tk.Canvas(shell, bg=T.bg, highlightthickness=0, bd=0)
         self._canvas.pack(fill="both", expand=True)
         body = tk.Frame(self._canvas, bg=T.panel_fill)
+        self._body = body
         self._win_id = self._canvas.create_window(0, 0, window=body, anchor="nw")
 
-        top = tk.Frame(body, bg=T.panel_fill)
-        top.pack(fill="x", padx=pad, pady=(pad, 2))
-        tk.Label(top, text="AOS", bg=T.panel_fill, fg=T.cyan,
-                 font=("Consolas", 10, "bold")).pack(side="left")
-        self.lbl_state = tk.Label(top, text="", bg=T.panel_fill, fg=T.ink_dim,
-                                  font=font_small)
-        self.lbl_state.pack(side="left", padx=(8, 0))
-        close = tk.Label(top, text="X", bg=T.panel_fill, fg=T.ink_dim, font=font_small,
-                         cursor="hand2")
-        close.pack(side="right")
-        close.bind("<Button-1>", lambda e: self.toggle(False))
+        # верхней панели с заголовком и крестиком нет — только данные
+        self.lbl_state = tk.Label(body, text="", bg=T.panel_fill, fg=T.ink_dim,
+                                  font=("Consolas", 8))
+        self.lbl_state.pack(anchor="e", padx=pad, pady=(pad - 4, 0))
 
-        self.lbl_profile = tk.Label(body, text="", bg=T.panel_fill, fg=T.ink_dim,
-                                    font=font_small, anchor="w")
-        self.lbl_profile.pack(fill="x", padx=pad)
-        self.lbl_value = tk.Label(body, text="—", bg=T.panel_fill, fg=T.green,
-                                  font=font_big, anchor="w")
-        self.lbl_value.pack(fill="x", padx=pad)
-        self.lbl_est = tk.Label(body, text="", bg=T.panel_fill, fg=T.cyan_soft,
-                                font=font_small, anchor="w")
-        self.lbl_est.pack(fill="x", padx=pad)
-        self.lbl_when = tk.Label(body, text="", bg=T.panel_fill, fg=T.ink_dim,
-                                 font=font_small, anchor="w")
-        self.lbl_when.pack(fill="x", padx=pad)
+        # строки профилей: имя + баланс (по одной на профиль)
+        self._row_frames = []
+        self._row_labels = {}
+        self.rows_box = tk.Frame(body, bg=T.panel_fill)
+        self.rows_box.pack(fill="x", padx=pad, pady=(2, 2))
+        self._row_font = font_small
+        self._row_font_big = font_big
+        self._rebuild_rows()
+
         self.lbl_hint = tk.Label(body, text="", bg=T.panel_fill, fg=T.cyan_dim,
                                  font=("Consolas", 7), anchor="w")
-        self.lbl_hint.pack(fill="x", padx=pad, pady=(0, pad))
-
-        width = {"compact": 200, "wide": 360}.get(preset, 280)
-        self.settings["_width"] = width
+        # сначала даём Tk разложить всё, потом меряем реальные размеры содержимого
         body.update_idletasks()
-        self._canvas.configure(width=width, height=max(70, body.winfo_reqheight()))
-        self._draw_round(width, max(70, body.winfo_reqheight()))
+        try:
+            body.master.master.update_idletasks()   # окно -> canvas -> body
+        except Exception:
+            pass
+        content_w = max(body.winfo_reqwidth(), body.winfo_width())
+        content_h = max(body.winfo_reqheight(), body.winfo_height())
+        width = max(170, content_w + 18)   # +18: правый отступ, чтобы текст не прилипал к краю
+        need_h = max(60, content_h + 6)
+        self._canvas.configure(width=width, height=need_h)
+        self._draw_round(width, need_h)
         self._canvas.bind("<Configure>", lambda e: self._draw_round(e.width, e.height))
 
         def bind_all(widget):
@@ -2576,37 +2627,114 @@ class AOSOverlay:
             m.grab_release()
 
     def refresh(self):
-        profile = self.app._find(self.app.selected) if self.app.selected else None
-        if not profile:
+        profiles = self._visible_profiles()
+        if not profiles:
             try:
-                self.lbl_profile.configure(text="нет профиля")
-                self.lbl_value.configure(text="—", fg=T.ink_dim)
-                self.lbl_est.configure(text="")
+                self.lbl_state.configure(text="●", fg=T.ink_dim)
+                self.lbl_when.configure(text="нет профиля")
             except Exception:
                 pass
             return
-        data = profile.get("_balance")
-        err = profile.get("_balance_error")
+        any_data = any(p.get("_balance") for p in profiles)
+        any_err = any(p.get("_balance_error") for p in profiles)
         try:
-            self.lbl_state.configure(text="●", fg=T.green if data else T.red)
-            if self.settings.get("show_profile", True):
-                self.lbl_profile.configure(
-                    text=str(profile.get("display_name") or profile["id"])[:28])
-            if data:
-                self.lbl_value.configure(text=data.get("text") or "—", fg=T.green)
-                coef = str(profile.get("coefficient") or "").strip()
-                est = coefficient_estimate(data.get("tokens"), coef) if (
-                    coef and self.settings.get("show_coefficient", True)) else {}
-                self.lbl_est.configure(
-                    text=("≈ %s при к=%s" % (est["text"], coef)) if est else "")
-                at = profile.get("_balance_at")
-                self.lbl_when.configure(text=at.strftime("%H:%M:%S") if at else "")
-            else:
-                self.lbl_value.configure(text="—", fg=T.ink_dim)
-                self.lbl_est.configure(text=self._fit_error(err))
-                self.lbl_when.configure(text="")
+            self.lbl_state.configure(text="●",
+                                     fg=T.green if any_data else (T.red if any_err else T.ink_dim))
         except Exception:
             pass
+        self._update_rows()
+        try:
+            stamps = [p.get("_balance_at") for p in profiles if p.get("_balance_at")]
+            self.lbl_when.configure(
+                text=max(stamps).strftime("%H:%M:%S") if stamps else "")
+        except Exception:
+            pass
+
+    def _visible_profiles(self):
+        """Профили, баланс которых показывается: выбранные в настройках или текущий."""
+        want = list(self.settings.get("profiles") or [])
+        if not want:
+            cur = self.app._find(self.app.selected) if self.app.selected else None
+            return [cur] if cur else []
+        out = []
+        for pid in want:
+            prof = self.app._find(pid)
+            if prof is not None:
+                out.append(prof)
+        if not out:
+            cur = self.app._find(self.app.selected) if self.app.selected else None
+            if cur:
+                out.append(cur)
+        return out
+
+    def _rebuild_rows(self):
+        """Пересоздаёт строки профилей (вызывается при смене состава/размера)."""
+        box = getattr(self, "rows_box", None)
+        if box is None:
+            return
+        for ch in box.winfo_children():
+            ch.destroy()
+        self._row_labels = {}
+        profiles = self._visible_profiles()
+        for idx, prof in enumerate(profiles):
+            if idx:  # разделительная полоса между профилями
+                sep = tk.Canvas(box, height=1, bg=T.panel_fill,
+                                highlightthickness=0, bd=0, width=1)
+                sep.pack(fill="x", padx=1, pady=6)
+                sep.create_line(0, 0, 400, 0, fill=T.panel_edge, width=1)
+            row = tk.Frame(box, bg=T.panel_fill)
+            row.pack(fill="x", pady=1)
+            panel_w = int(self.settings.get("_width", 280))
+            max_chars = max(12, (panel_w - 30) // 7)
+            shown = str(prof.get("display_name") or prof["id"])
+            if len(shown) > max_chars:
+                shown = shown[:max_chars - 1] + "…"
+            name = tk.Label(row, text=shown, bg=T.panel_fill, fg=T.ink_dim,
+                            font=self._row_font, anchor="w")
+            name.pack(anchor="w")
+            value = tk.Label(row, text="—", bg=T.panel_fill, fg=T.ink_dim,
+                             font=self._row_font_big, anchor="w")
+            value.pack(anchor="w")
+            est = tk.Label(row, text="", bg=T.panel_fill, fg=T.cyan_soft,
+                           font=self._row_font, anchor="w")
+            est.pack(anchor="w")
+            self._row_labels[prof["id"]] = (value, est)
+
+    def _update_rows(self):
+        """Обновляет текст строк без пересоздания виджетов."""
+        profiles = self._visible_profiles()
+        known = set(self._row_labels)
+        want = {p["id"] for p in profiles}
+        if known != want:
+            self._rebuild_rows()
+        for prof in profiles:
+            pair = self._row_labels.get(prof["id"])
+            if not pair:
+                continue
+            value, est = pair
+            data = prof.get("_balance")
+            err = prof.get("_balance_error")
+            if data:
+                value.configure(text=data.get("text") or "—", fg=T.green)
+                coef = str(prof.get("coefficient") or "").strip()
+                e = coefficient_estimate(data.get("tokens"), coef) if (
+                    coef and self.settings.get("show_coefficient", True)) else {}
+                est.configure(text=("≈ %s (к=%s)" % (e["text"], coef)) if e else "")
+            elif err:
+                value.configure(text="—", fg=T.red)
+                est.configure(text=self._fit_error(err))
+            else:
+                value.configure(text="—", fg=T.ink_dim)
+                est.configure(text="нет данных")
+
+    def set_profiles(self, ids):
+        """Задаёт список профилей для отображения в AOS."""
+        self.settings["profiles"] = list(ids)
+        save_aos_settings(self.settings)
+        if self.win is not None and self.win.winfo_exists():
+            self._build_content(self.win)
+            self.apply_position()
+            self.refresh()
 
     def _fit_error(self, err):
         """Короткий текст ошибки, гарантированно влезающий по ширине."""
@@ -2688,6 +2816,7 @@ class AOSSettingsDialog(tk.Toplevel):
         self.var_coef = tk.BooleanVar(value=bool(aos.settings.get("show_coefficient", True)))
         self.var_enabled = tk.BooleanVar(value=bool(aos.settings.get("enabled", False)))
         self.var_click = tk.BooleanVar(value=bool(aos.settings.get("click_through", True)))
+        self._profiles_sel = list(aos.settings.get("profiles") or [])
 
         self._build()
         self.bind("<Escape>", lambda e: self.destroy())
@@ -2763,6 +2892,23 @@ class AOSSettingsDialog(tk.Toplevel):
             ttk.Radiobutton(freq, text=title, value=sec, variable=self.var_refresh,
                             command=self._apply_live).pack(side="left", padx=(2, 12))
 
+        # какие профили показывать
+        tk.Label(self, text="ПРОФИЛИ В ОВЕРЛЕЕ (несколько — Ctrl/Shift)",
+                 bg=T.bg, fg=T.ink_dim, font=T.mono_small).pack(anchor="w", padx=18,
+                                                                pady=(12, 2))
+        prow = tk.Frame(self, bg=T.bg)
+        prow.pack(fill="x", padx=16)
+        self.lst_profiles = tk.Listbox(
+            prow, selectmode="extended", height=4, bg=T.bg_input, fg=T.ink,
+            selectbackground="#0b3547", selectforeground=T.cyan,
+            font=T.mono_small, bd=0, highlightthickness=1,
+            highlightbackground=T.line, activestyle="none")
+        self.lst_profiles.pack(side="left", fill="x", expand=True)
+        psb = ttk.Scrollbar(prow, orient="vertical", command=self.lst_profiles.yview)
+        self.lst_profiles.configure(yscrollcommand=psb.set)
+        psb.pack(side="right", fill="y")
+        self._fill_profiles_list()
+
         # что показывать
         tk.Label(self, text="СОДЕРЖИМОЕ", bg=T.bg, fg=T.ink_dim,
                  font=T.mono_small).pack(anchor="w", padx=18, pady=(12, 2))
@@ -2783,6 +2929,29 @@ class AOSSettingsDialog(tk.Toplevel):
                    command=self._apply_and_close).pack(side="right", padx=4)
         ttk.Button(foot, text="СБРОСИТЬ ПОЛОЖЕНИЕ",
                    command=self._reset_position).pack(side="left", padx=4)
+
+    def _fill_profiles_list(self):
+        try:
+            self.lst_profiles.delete(0, "end")
+            self._profile_ids = []
+            for prof in self.app.profiles:
+                pid = prof.get("id")
+                if not pid:
+                    continue
+                name = str(prof.get("display_name") or pid)
+                self.lst_profiles.insert("end", "%-22s %s" % (name[:22], prof.get("base_url", "")[:28]))
+                self._profile_ids.append(pid)
+            for idx, pid in enumerate(self._profile_ids):
+                if pid in self._profiles_sel:
+                    self.lst_profiles.selection_set(idx)
+        except Exception:
+            pass
+
+    def _read_profiles_selection(self):
+        try:
+            return [self._profile_ids[i] for i in self.lst_profiles.curselection()]
+        except Exception:
+            return []
 
     # --- действия ---------------------------------------------------------
     def _toggle_enabled(self):
@@ -2822,7 +2991,13 @@ class AOSSettingsDialog(tk.Toplevel):
         s["show_profile"] = bool(self.var_profile.get())
         s["show_coefficient"] = bool(self.var_coef.get())
         s["click_through"] = bool(self.var_click.get())
+        selected = self._read_profiles_selection()
+        s["profiles"] = selected
         save_aos_settings(s)
+        try:
+            self.aos._rebuild_rows()
+        except Exception:
+            pass
 
         if self.aos.win is None or not self.aos.win.winfo_exists():
             return
@@ -3337,11 +3512,27 @@ class App:
         return chosen["value"]
 
     # --- баланс профиля ---------------------------------------------------
-    def request_balance(self, silent=False):
+    def _balance_targets(self):
+        """Какие профили обновлять: выбранные в AOS или текущий."""
+        aos = getattr(self, "aos", None)
+        if aos is not None:
+            try:
+                chosen = aos._visible_profiles()
+                if chosen:
+                    return chosen
+            except Exception:
+                pass
+        cur = self._find(self.selected) if self.selected else None
+        return [cur] if cur else []
+
+    def request_balance(self, silent=False, force=False):
         if not hasattr(self, "_balance_results"):
             self._balance_results = queue.Queue()
-        profile = self._find(self.selected) if self.selected else None
-        if not profile:
+        # защита от параллельных запросов: иначе несколько вызовов подряд дают 429
+        if getattr(self, "_balance_busy", False) and not force:
+            return
+        targets = self._balance_targets()
+        if not targets:
             if not silent:
                 messagebox.showinfo("Баланс", "Выберите профиль в списке", parent=self.root)
             return
@@ -3353,12 +3544,19 @@ class App:
         except Exception:
             pass
 
+        jobs = [(p["id"], p["base_url"], p["api_key"]) for p in targets]
+        self._balance_busy = True
+        self._balance_pending = len(jobs)
+
         def work():
-            try:
-                self._balance_results.put((profile["id"], fetch_balance(
-                    profile["base_url"], profile["api_key"]), None))
-            except Exception as exc:
-                self._balance_results.put((profile["id"], None, exc))
+            # последовательно с небольшой паузой: не упираемся в рейт-лимит
+            for idx, (pid, url, key) in enumerate(jobs):
+                if idx:
+                    time.sleep(0.8)
+                try:
+                    self._balance_results.put((pid, fetch_balance(url, key), None))
+                except Exception as exc:
+                    self._balance_results.put((pid, None, exc))
 
         threading.Thread(target=work, daemon=True).start()
         self.root.after(120, self._poll_balance)
@@ -3367,12 +3565,16 @@ class App:
         try:
             pid, data, err = self._balance_results.get_nowait()
         except queue.Empty:
+            pending = getattr(self, "_balance_pending", 0)
+            if pending <= 0:
+                self._balance_busy = False
             self.root.after(120, self._poll_balance)
             return
         try:
             self.btn_balance_main.configure(state="normal")
         except Exception:
             pass
+        self._balance_pending = max(0, getattr(self, "_balance_pending", 1) - 1)
         profile = self._find(pid)
         if profile is None:
             return
@@ -3388,10 +3590,22 @@ class App:
                     aos.refresh()
             except Exception:
                 pass
+            if getattr(self, "_balance_pending", 0) > 0:
+                self.root.after(80, self._poll_balance)
             return
         profile["_balance"] = data
         profile["_balance_error"] = None
         profile["_balance_at"] = datetime.now()
+        # AOS показывает несколько профилей — обновляем строки после каждого ответа
+        try:
+            aos = getattr(self, "aos", None)
+            if aos is not None and aos.win is not None and aos.win.winfo_exists():
+                aos.refresh()
+        except Exception:
+            pass
+        # продолжаем опрос очереди: профилей может быть несколько
+        if getattr(self, "_balance_pending", 0) > 0:
+            self.root.after(80, self._poll_balance)
         if pid == self.selected:
             self._show_balance(profile)
             # AOS тоже должен обновиться сразу после запроса
