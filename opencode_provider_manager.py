@@ -2381,7 +2381,12 @@ class AOSOverlay:
             pass
 
     def fit_to_content(self):
-        """Подгоняет окно оверлея точно под размер содержимого (после раскладки Tk)."""
+        """Подгоняет окно точно под содержимое: ширина по самой широкой строке.
+
+        Меряем шрифтом Tk, а не reqwidth контейнера — тот после удаления строк
+        отдаёт устаревшее маленькое значение. Ширина может и уменьшаться
+        (когда профилей стало меньше) — это и убирает пустое место справа.
+        """
         win = self.win
         if win is None or not win.winfo_exists():
             return
@@ -2391,38 +2396,54 @@ class AOSOverlay:
         try:
             body.update_idletasks()
             win.update_idletasks()
-            # меряем ширину по фактическому тексту шрифтом Tk — это не зависит от
-            # того, успела ли пересчитаться геометрия после удаления строк
-            cw = 0
+
             rows_box = getattr(self, "rows_box", None)
-            if rows_box is not None:
-                rows_box.update_idletasks()
-                cw = rows_box.winfo_reqwidth()
-            cw = max(cw, body.winfo_reqwidth())
+            labels = getattr(self, "_row_labels", {}) or {}
+            if not labels:
+                return
+
+            # 1) ширина по фактическим строкам текста
+            text_w = 0
             try:
                 import tkinter.font as tkfont
                 f_small = tkfont.Font(font=self._row_font)
                 f_big = tkfont.Font(font=self._row_font_big)
-                need = 0
-                for pid, (val, est) in getattr(self, "_row_labels", {}).items():
+                for pid, pair in labels.items():
+                    val, est = pair
                     for widget, font in ((val, f_big), (est, f_small)):
                         txt = widget.cget("text") or ""
-                        need = max(need, font.measure(txt))
-                # + отступы панели (2*14) и полоса разделителя
-                cw = max(cw, need + 40)
+                        if txt:
+                            text_w = max(text_w, font.measure(txt))
             except Exception:
-                pass
-            # ширина не должна уменьшаться ниже уже показанной: иначе окно
-            # «съезжает» и обрезает оставшиеся профили
-            keep_w = max(int(getattr(self, "_keep_width", 0) or 0),
-                         int(getattr(self, "_last_fit_w", 0) or 0))
-            if keep_w and cw + 12 < keep_w:
-                cw = keep_w - 12
-            ch = max(body.winfo_reqheight(), rows_box.winfo_reqheight() if rows_box else 0)
-            if cw < 40 or ch < 30:
+                text_w = 0
+
+            # 2) измерение контейнера как запасной вариант
+            geo_w = 0
+            if rows_box is not None:
+                rows_box.update_idletasks()
+                geo_w = rows_box.winfo_reqwidth()
+            # отступы содержимого: pad слева/справа + небольшой запас на рамку
+            pad = 2 * (10 if self.settings.get("preset") == "compact" else 14) + 4
+            # если строки пока без данных («—»), ориентируемся на геометрию контейнера
+            if text_w and text_w > 40:
+                cw = text_w + pad
+            else:
+                cw = max(geo_w, body.winfo_reqwidth())
+
+            ch = max(body.winfo_reqheight(),
+                     rows_box.winfo_reqheight() if rows_box is not None else 0)
+            if cw < 60 or ch < 30:
                 return
-            width = cw + 12
-            height = ch + 4
+
+            width = int(cw) + 2
+            height = int(ch) + 4
+            cur_w = self._canvas.winfo_width()
+            cur_h = self._canvas.winfo_height()
+            cur_w = 0 if cur_w <= 1 else cur_w
+            cur_h = 0 if cur_h <= 1 else cur_h
+            # меняем при реальной разнице (и когда до этого окно было не того размера)
+            if cur_w == width and cur_h == height and self._body.winfo_height() == height - 4:
+                return
             self._last_fit_w = width
             self._canvas.configure(width=width, height=height)
             self._draw_round(width, height)
@@ -2697,13 +2718,6 @@ class AOSOverlay:
         for ch in box.winfo_children():
             ch.destroy()
         self._row_labels = {}
-        # запоминаем текущую ширину окна: при удалении профиля окно не должно «съезжать»
-        try:
-            if self.win is not None and self.win.winfo_exists():
-                self._keep_width = max(int(getattr(self, "_keep_width", 0) or 0),
-                                       self.win.winfo_width())
-        except Exception:
-            pass
         profiles = self._visible_profiles()
         for idx, prof in enumerate(profiles):
             if idx:  # разделительная полоса между профилями

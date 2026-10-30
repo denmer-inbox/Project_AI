@@ -1820,32 +1820,43 @@ class _at:
         try:
             body.update_idletasks()
             win.update_idletasks()
-            cw = 0
             rows_box = getattr(self, 'rows_box', None)
-            if rows_box is not None:
-                rows_box.update_idletasks()
-                cw = rows_box.winfo_reqwidth()
-            cw = max(cw, body.winfo_reqwidth())
+            labels = getattr(self, '_row_labels', {}) or {}
+            if not labels:
+                return
+            text_w = 0
             try:
                 import tkinter.font as tkfont
                 f_small = tkfont.Font(font=self._row_font)
                 f_big = tkfont.Font(font=self._row_font_big)
-                need = 0
-                for pid, (val, est) in getattr(self, '_row_labels', {}).items():
+                for pid, pair in labels.items():
+                    val, est = pair
                     for widget, font in ((val, f_big), (est, f_small)):
                         txt = widget.cget('text') or ''
-                        need = max(need, font.measure(txt))
-                cw = max(cw, need + 40)
+                        if txt:
+                            text_w = max(text_w, font.measure(txt))
             except Exception:
-                pass
-            keep_w = max(int(getattr(self, '_keep_width', 0) or 0), int(getattr(self, '_last_fit_w', 0) or 0))
-            if keep_w and cw + 12 < keep_w:
-                cw = keep_w - 12
-            ch = max(body.winfo_reqheight(), rows_box.winfo_reqheight() if rows_box else 0)
-            if cw < 40 or ch < 30:
+                text_w = 0
+            geo_w = 0
+            if rows_box is not None:
+                rows_box.update_idletasks()
+                geo_w = rows_box.winfo_reqwidth()
+            pad = 2 * (10 if self.settings.get('preset') == 'compact' else 14) + 4
+            if text_w and text_w > 40:
+                cw = text_w + pad
+            else:
+                cw = max(geo_w, body.winfo_reqwidth())
+            ch = max(body.winfo_reqheight(), rows_box.winfo_reqheight() if rows_box is not None else 0)
+            if cw < 60 or ch < 30:
                 return
-            width = cw + 12
-            height = ch + 4
+            width = int(cw) + 2
+            height = int(ch) + 4
+            cur_w = self._canvas.winfo_width()
+            cur_h = self._canvas.winfo_height()
+            cur_w = 0 if cur_w <= 1 else cur_w
+            cur_h = 0 if cur_h <= 1 else cur_h
+            if cur_w == width and cur_h == height and (self._body.winfo_height() == height - 4):
+                return
             self._last_fit_w = width
             self._canvas.configure(width=width, height=height)
             self._draw_round(width, height)
@@ -2080,11 +2091,6 @@ class _at:
         for ch in box.winfo_children():
             ch.destroy()
         self._row_labels = {}
-        try:
-            if self.win is not None and self.win.winfo_exists():
-                self._keep_width = max(int(getattr(self, '_keep_width', 0) or 0), self.win.winfo_width())
-        except Exception:
-            pass
         profiles = self._visible_profiles()
         for idx, prof in enumerate(profiles):
             if idx:
