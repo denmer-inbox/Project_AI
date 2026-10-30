@@ -2054,6 +2054,10 @@ class TrayIcon:
         menu.add_separator()
         menu.add_command(label="НАСТРОЙКИ AOS…", command=self.app.open_aos_settings)
         menu.add_separator()
+        auto = autostart_enabled()
+        menu.add_command(label=("✓ " if auto else "   ") + "АВТОЗАГРУЗКА В ТРЕЕ",
+                         command=self._toggle_autostart)
+        menu.add_separator()
         menu.add_command(label="ЗАКРЫТЬ ПРИЛОЖЕНИЕ", command=self.app.quit_app)
 
         x, y = self._cursor_pos()
@@ -2064,6 +2068,24 @@ class TrayIcon:
         self._menu = menu
 
     # --- действия меню ----------------------------------------------------
+    def _toggle_autostart(self):
+        """Включает/выключает автозагрузку приложения в трее."""
+        target = not autostart_enabled()
+        ok = set_autostart(target)
+        if not ok:
+            try:
+                messagebox.showerror("Автозагрузка",
+                                     "Не удалось изменить параметр автозагрузки.",
+                                     parent=self.app.root)
+            except Exception:
+                pass
+            return
+        state = "ВКЛЮЧЕНА" if target else "ВЫКЛЮЧЕНА"
+        try:
+            self.app._set_status("АВТОЗАГРУЗКА В ТРЕЕ: " + state)
+        except Exception:
+            pass
+
     def _toggle_aos_visible(self):
         aos = getattr(self.app, "aos", None) or self.app._aos()
         if aos is None:
@@ -2381,9 +2403,12 @@ class AOSOverlay:
             pass
 
     def _set_state_dot(self, color):
-        """Меняет цвет индикатора состояния."""
+        """Меняет цвет индикатора состояния «●»."""
+        self._dot_color = color
         try:
-            self.state_dot.itemconfigure(self._dot_id, fill=color)
+            lbl = getattr(self, "lbl_state", None)
+            if lbl is not None:
+                lbl.configure(fg=color)
         except Exception:
             pass
 
@@ -2437,8 +2462,11 @@ class AOSOverlay:
             else:
                 cw = max(geo_w, body.winfo_reqwidth())
 
-            ch = max(body.winfo_reqheight(),
-                     rows_box.winfo_reqheight() if rows_box is not None else 0)
+            body.update_idletasks()
+            # высоту берём по нижней границе последнего элемента строк
+            rb_h = rows_box.winfo_height() if rows_box is not None else 0
+            rb_y = rows_box.winfo_y() if rows_box is not None else 0
+            ch = max(rb_y + rb_h, body.winfo_height()) + 8
             if cw < 60 or ch < 30:
                 return
 
@@ -2527,22 +2555,19 @@ class AOSOverlay:
         self._body = body
         self._win_id = self._canvas.create_window(0, 0, window=body, anchor="nw")
 
-        # верхней панели с заголовком и крестиком нет — только индикатор состояния.
-        # Рисуем круг на канве: размер точный, шрифт не влияет.
-        self.state_dot = tk.Canvas(body, width=12, height=10, bg=T.panel_fill,
-                                   highlightthickness=0, bd=0)
-        # в правом верхнем углу, без вертикального отступа
-        self.state_dot.pack(anchor="e", padx=(pad, pad + 2), pady=(0, 0))
-        self._dot_id = self.state_dot.create_oval(2, 2, 10, 10, fill=T.ink_dim, outline="")
+        # индикатор «●» правым краем сверху; высота минимальная, чтобы
+        # не добавлять заметного отступа над строками профилей
+        # индикатор «●» живёт в первой строке профиля (справа), а не отдельной строкой
 
         # строки профилей: имя + баланс (по одной на профиль)
         self._row_frames = []
         self._row_labels = {}
         self.rows_box = tk.Frame(body, bg=T.panel_fill)
-        self.rows_box.pack(fill="x", padx=pad, pady=(0, 2))
+        self.rows_box.pack(fill="x", padx=pad, pady=(0, pad))
         self._row_font = font_small
         self._row_font_big = font_big
         self._rebuild_rows()
+
 
         self.lbl_hint = tk.Label(body, text="", bg=T.panel_fill, fg=T.cyan_dim,
                                  font=("Consolas", 7), anchor="w")
@@ -2741,9 +2766,17 @@ class AOSOverlay:
             shown = str(prof.get("display_name") or prof["id"])
             if len(shown) > max_chars:
                 shown = shown[:max_chars - 1] + "…"
-            name = tk.Label(row, text=shown, bg=T.panel_fill, fg=T.ink_dim,
+            name_line = tk.Frame(row, bg=T.panel_fill)
+            name_line.pack(fill="x")
+            name = tk.Label(name_line, text=shown, bg=T.panel_fill, fg=T.ink_dim,
                             font=self._row_font, anchor="w")
-            name.pack(anchor="w")
+            name.pack(side="left")
+            if idx == 0:
+                # индикатор состояния — справа в строке первого профиля
+                self.lbl_state = tk.Label(name_line, text="●", bg=T.panel_fill,
+                                          fg=getattr(self, "_dot_color", T.ink_dim),
+                                          font=("Consolas", 9, "bold"), bd=0, pady=0)
+                self.lbl_state.pack(side="right")
             value = tk.Label(row, text="—", bg=T.panel_fill, fg=T.ink_dim,
                              font=self._row_font_big, anchor="w")
             value.pack(anchor="w")
@@ -3327,6 +3360,12 @@ class App:
             self.root.after(400, self._install_tray)
         except Exception:
             self.tray = None
+        # запуск с ключом --tray (автозагрузка): окно сразу свёрнуто в трей
+        if started_minimized():
+            try:
+                self.root.withdraw()
+            except Exception:
+                pass
 
     # --- окна -------------------------------------------------------------
     def _build_root(self):
@@ -4332,6 +4371,61 @@ def hide_console():
     except Exception:
         pass
 
+
+# ==========================================================================
+# Автозагрузка в трее (реестр Windows Run)
+# ==========================================================================
+
+_AUTOSTART_KEY = r"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+_AUTOSTART_NAME = "OpenCodeProviderManager"
+
+
+def _app_command_line():
+    """Команда запуска приложения для автозагрузки (с ключом --tray)."""
+    if getattr(sys, "frozen", False):
+        return '"%s" --tray' % sys.executable
+    script = Path(__file__).resolve()
+    pyw = Path(sys.executable).with_name("pythonw.exe")
+    exe = pyw if pyw.exists() else Path(sys.executable)
+    return '"%s" "%s" --tray' % (exe, script)
+
+
+def autostart_enabled() -> bool:
+    """Включена ли автозагрузка (запись в реестре существует)."""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _AUTOSTART_KEY) as key:
+            value, _ = winreg.QueryValueEx(key, _AUTOSTART_NAME)
+            return bool(value)
+    except Exception:
+        return False
+
+
+def set_autostart(enabled: bool) -> bool:
+    """Включает/выключает автозагрузку приложения в трее."""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _AUTOSTART_KEY, 0,
+                            winreg.KEY_SET_VALUE) as key:
+            if enabled:
+                winreg.SetValueEx(key, _AUTOSTART_NAME, 0, winreg.REG_SZ,
+                                  _app_command_line())
+            else:
+                try:
+                    winreg.DeleteValue(key, _AUTOSTART_NAME)
+                except FileNotFoundError:
+                    pass
+        return True
+    except Exception:
+        return False
+
+
+def started_minimized() -> bool:
+    """Запущено ли приложение с ключом --tray (сразу свёрнутым в трей)."""
+    try:
+        return "--tray" in sys.argv
+    except Exception:
+        return False
 
 # ==========================================================================
 # Защита от двойного запуска (именованный mutex Windows)

@@ -1547,6 +1547,9 @@ class _am:
         menu.add_separator()
         menu.add_command(label='НАСТРОЙКИ AOS…', command=self.app.open_aos_settings)
         menu.add_separator()
+        auto = _a6()
+        menu.add_command(label=('✓ ' if auto else '   ') + 'АВТОЗАГРУЗКА В ТРЕЕ', command=self._toggle_autostart)
+        menu.add_separator()
         menu.add_command(label='ЗАКРЫТЬ ПРИЛОЖЕНИЕ', command=self.app.quit_app)
         x, y = self._cursor_pos()
         try:
@@ -1554,6 +1557,21 @@ class _am:
         finally:
             menu.grab_release()
         self._menu = menu
+
+    def _toggle_autostart(self):
+        target = not _a6()
+        ok = _a7(target)
+        if not ok:
+            try:
+                messagebox.showerror('Автозагрузка', 'Не удалось изменить параметр автозагрузки.', parent=self.app.root)
+            except Exception:
+                pass
+            return
+        state = 'ВКЛЮЧЕНА' if target else 'ВЫКЛЮЧЕНА'
+        try:
+            self.app._set_status('АВТОЗАГРУЗКА В ТРЕЕ: ' + state)
+        except Exception:
+            pass
 
     def _toggle_aos_visible(self):
         aos = getattr(self.app, 'aos', None) or self.app._aos()
@@ -1811,8 +1829,11 @@ class _at:
             pass
 
     def _set_state_dot(self, color):
+        self._dot_color = color
         try:
-            self.state_dot.itemconfigure(self._dot_id, fill=color)
+            lbl = getattr(self, 'lbl_state', None)
+            if lbl is not None:
+                lbl.configure(fg=color)
         except Exception:
             pass
 
@@ -1852,7 +1873,10 @@ class _at:
                 cw = text_w + pad
             else:
                 cw = max(geo_w, body.winfo_reqwidth())
-            ch = max(body.winfo_reqheight(), rows_box.winfo_reqheight() if rows_box is not None else 0)
+            body.update_idletasks()
+            rb_h = rows_box.winfo_height() if rows_box is not None else 0
+            rb_y = rows_box.winfo_y() if rows_box is not None else 0
+            ch = max(rb_y + rb_h, body.winfo_height()) + 8
             if cw < 60 or ch < 30:
                 return
             width = int(cw) + 2
@@ -1931,13 +1955,10 @@ class _at:
         body = tk.Frame(self._canvas, bg=_b.panel_fill)
         self._body = body
         self._win_id = self._canvas.create_window(0, 0, window=body, anchor='nw')
-        self.state_dot = tk.Canvas(body, width=12, height=10, bg=_b.panel_fill, highlightthickness=0, bd=0)
-        self.state_dot.pack(anchor='e', padx=(pad, pad + 2), pady=(0, 0))
-        self._dot_id = self.state_dot.create_oval(2, 2, 10, 10, fill=_b.ink_dim, outline='')
         self._row_frames = []
         self._row_labels = {}
         self.rows_box = tk.Frame(body, bg=_b.panel_fill)
-        self.rows_box.pack(fill='x', padx=pad, pady=(0, 2))
+        self.rows_box.pack(fill='x', padx=pad, pady=(0, pad))
         self._row_font = font_small
         self._row_font_big = font_big
         self._rebuild_rows()
@@ -2111,8 +2132,13 @@ class _at:
             shown = str(prof.get('display_name') or prof['id'])
             if len(shown) > max_chars:
                 shown = shown[:max_chars - 1] + '…'
-            name = tk.Label(row, text=shown, bg=_b.panel_fill, fg=_b.ink_dim, font=self._row_font, anchor='w')
-            name.pack(anchor='w')
+            name_line = tk.Frame(row, bg=_b.panel_fill)
+            name_line.pack(fill='x')
+            name = tk.Label(name_line, text=shown, bg=_b.panel_fill, fg=_b.ink_dim, font=self._row_font, anchor='w')
+            name.pack(side='left')
+            if idx == 0:
+                self.lbl_state = tk.Label(name_line, text='●', bg=_b.panel_fill, fg=getattr(self, '_dot_color', _b.ink_dim), font=('Consolas', 9, 'bold'), bd=0, pady=0)
+                self.lbl_state.pack(side='right')
             value = tk.Label(row, text='—', bg=_b.panel_fill, fg=_b.ink_dim, font=self._row_font_big, anchor='w')
             value.pack(anchor='w')
             est = tk.Label(row, text='', bg=_b.panel_fill, fg=_b.cyan_soft, font=self._row_font, anchor='w')
@@ -2551,6 +2577,11 @@ class App:
             self.root.after(400, self._install_tray)
         except Exception:
             self.tray = None
+        if _a8():
+            try:
+                self.root.withdraw()
+            except Exception:
+                pass
 
     def _build_root(self):
         self.root = tk.Tk()
@@ -3344,11 +3375,51 @@ def _a4():
             ctypes.windll.kernel32.FreeConsole()
     except Exception:
         pass
+_AUTOSTART_KEY = 'Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run'
+_AUTOSTART_NAME = 'OpenCodeProviderManager'
+
+def _a5():
+    if getattr(sys, 'frozen', False):
+        return '"%s" --tray' % sys.executable
+    script = Path(__file__).resolve()
+    pyw = Path(sys.executable).with_name('pythonw.exe')
+    exe = pyw if pyw.exists() else Path(sys.executable)
+    return '"%s" "%s" --tray' % (exe, script)
+
+def _a6() -> bool:
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _AUTOSTART_KEY) as key:
+            value, _ = winreg.QueryValueEx(key, _AUTOSTART_NAME)
+            return bool(value)
+    except Exception:
+        return False
+
+def _a7(enabled: bool) -> bool:
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _AUTOSTART_KEY, 0, winreg.KEY_SET_VALUE) as key:
+            if enabled:
+                winreg.SetValueEx(key, _AUTOSTART_NAME, 0, winreg.REG_SZ, _a5())
+            else:
+                try:
+                    winreg.DeleteValue(key, _AUTOSTART_NAME)
+                except FileNotFoundError:
+                    pass
+        return True
+    except Exception:
+        return False
+
+def _a8() -> bool:
+    try:
+        return '--tray' in sys.argv
+    except Exception:
+        return False
 _SINGLE_INSTANCE_HANDLE = None
 _MUTEX_NAME = 'Global\\OpenCodeProviderManager.SingleInstance'
 _FIND_WINDOW_TITLE = 'OpenCode — менеджер провайдеров'
 
-def _a5():
+def _a9():
     global _SINGLE_INSTANCE_HANDLE
     try:
         import ctypes
@@ -3369,7 +3440,7 @@ def _a5():
     except Exception:
         return True
 
-def _a6():
+def _ba():
     try:
         import ctypes
         from ctypes import wintypes
@@ -3386,7 +3457,7 @@ def _a6():
     except Exception:
         return False
 
-def _a7():
+def _bb():
     try:
         import ctypes
         ctypes.windll.user32.MessageBoxW(None, 'Менеджер OpenCode уже запущен.\n\nОкно приложения восстановлено.', 'OpenCode — менеджер провайдеров', 64)
@@ -3395,9 +3466,9 @@ def _a7():
 
 def main():
     _a4()
-    if not _a5():
-        if not _a6():
-            _a7()
+    if not _a9():
+        if not _ba():
+            _bb()
         return 0
     notes = _a3()
     app = App()
