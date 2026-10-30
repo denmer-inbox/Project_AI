@@ -2380,6 +2380,13 @@ class AOSOverlay:
         except Exception:
             pass
 
+    def _set_state_dot(self, color):
+        """Меняет цвет индикатора состояния."""
+        try:
+            self.state_dot.itemconfigure(self._dot_id, fill=color)
+        except Exception:
+            pass
+
     def fit_to_content(self):
         """Подгоняет окно точно под содержимое: ширина по самой широкой строке.
 
@@ -2520,16 +2527,19 @@ class AOSOverlay:
         self._body = body
         self._win_id = self._canvas.create_window(0, 0, window=body, anchor="nw")
 
-        # верхней панели с заголовком и крестиком нет — только данные
-        self.lbl_state = tk.Label(body, text="", bg=T.panel_fill, fg=T.ink_dim,
-                                  font=("Consolas", 8))
-        self.lbl_state.pack(anchor="e", padx=pad, pady=(pad - 4, 0))
+        # верхней панели с заголовком и крестиком нет — только индикатор состояния.
+        # Рисуем круг на канве: размер точный, шрифт не влияет.
+        self.state_dot = tk.Canvas(body, width=12, height=10, bg=T.panel_fill,
+                                   highlightthickness=0, bd=0)
+        # в правом верхнем углу, без вертикального отступа
+        self.state_dot.pack(anchor="e", padx=(pad, pad + 2), pady=(0, 0))
+        self._dot_id = self.state_dot.create_oval(2, 2, 10, 10, fill=T.ink_dim, outline="")
 
         # строки профилей: имя + баланс (по одной на профиль)
         self._row_frames = []
         self._row_labels = {}
         self.rows_box = tk.Frame(body, bg=T.panel_fill)
-        self.rows_box.pack(fill="x", padx=pad, pady=(2, 2))
+        self.rows_box.pack(fill="x", padx=pad, pady=(0, 2))
         self._row_font = font_small
         self._row_font_big = font_big
         self._rebuild_rows()
@@ -2678,7 +2688,7 @@ class AOSOverlay:
         profiles = self._visible_profiles()
         if not profiles:
             try:
-                self.lbl_state.configure(text="●", fg=T.ink_dim)
+                self._set_state_dot(T.ink_dim)
                 self.lbl_when.configure(text="нет профиля")
             except Exception:
                 pass
@@ -2686,8 +2696,7 @@ class AOSOverlay:
         any_data = any(p.get("_balance") for p in profiles)
         any_err = any(p.get("_balance_error") for p in profiles)
         try:
-            self.lbl_state.configure(text="●",
-                                     fg=T.green if any_data else (T.red if any_err else T.ink_dim))
+            self._set_state_dot(T.green if any_data else (T.red if any_err else T.ink_dim))
         except Exception:
             pass
         self._update_rows()

@@ -1810,6 +1810,12 @@ class _at:
         except Exception:
             pass
 
+    def _set_state_dot(self, color):
+        try:
+            self.state_dot.itemconfigure(self._dot_id, fill=color)
+        except Exception:
+            pass
+
     def fit_to_content(self):
         win = self.win
         if win is None or not win.winfo_exists():
@@ -1925,12 +1931,13 @@ class _at:
         body = tk.Frame(self._canvas, bg=_b.panel_fill)
         self._body = body
         self._win_id = self._canvas.create_window(0, 0, window=body, anchor='nw')
-        self.lbl_state = tk.Label(body, text='', bg=_b.panel_fill, fg=_b.ink_dim, font=('Consolas', 8))
-        self.lbl_state.pack(anchor='e', padx=pad, pady=(pad - 4, 0))
+        self.state_dot = tk.Canvas(body, width=12, height=10, bg=_b.panel_fill, highlightthickness=0, bd=0)
+        self.state_dot.pack(anchor='e', padx=(pad, pad + 2), pady=(0, 0))
+        self._dot_id = self.state_dot.create_oval(2, 2, 10, 10, fill=_b.ink_dim, outline='')
         self._row_frames = []
         self._row_labels = {}
         self.rows_box = tk.Frame(body, bg=_b.panel_fill)
-        self.rows_box.pack(fill='x', padx=pad, pady=(2, 2))
+        self.rows_box.pack(fill='x', padx=pad, pady=(0, 2))
         self._row_font = font_small
         self._row_font_big = font_big
         self._rebuild_rows()
@@ -2055,7 +2062,7 @@ class _at:
         profiles = self._visible_profiles()
         if not profiles:
             try:
-                self.lbl_state.configure(text='●', fg=_b.ink_dim)
+                self._set_state_dot(_b.ink_dim)
                 self.lbl_when.configure(text='нет профиля')
             except Exception:
                 pass
@@ -2063,7 +2070,7 @@ class _at:
         any_data = any((p.get('_balance') for p in profiles))
         any_err = any((p.get('_balance_error') for p in profiles))
         try:
-            self.lbl_state.configure(text='●', fg=_b.green if any_data else _b.red if any_err else _b.ink_dim)
+            self._set_state_dot(_b.green if any_data else _b.red if any_err else _b.ink_dim)
         except Exception:
             pass
         self._update_rows()
