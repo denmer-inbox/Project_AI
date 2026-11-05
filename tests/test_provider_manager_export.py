@@ -11,12 +11,12 @@ import pytest
 pytest.importorskip("tkinter")
 
 ROOT = Path(__file__).resolve().parent.parent
-MODULE_PATH = ROOT / "opencode_provider_manager.py"
+MODULE_PATH = ROOT / "agent_manager.py"
 
 
 @pytest.fixture(scope="module")
 def manager():
-    spec = importlib.util.spec_from_file_location("opencode_provider_manager", MODULE_PATH)
+    spec = importlib.util.spec_from_file_location("agent_manager", MODULE_PATH)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

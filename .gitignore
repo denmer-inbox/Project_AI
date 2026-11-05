@@ -49,8 +49,8 @@ _test_out*
 
 # --- сборка в dist/ хранится в репозитории ---------------------------------
 dist/*
-!dist/OpenCodeProviderManager/
+!dist/AgentManager/
 # внутри сборки нужны и *.pyd/*.pyc: без них приложение не запустится
-!dist/OpenCodeProviderManager/**
+!dist/AgentManager/**
 # портативная однофайловая сборка
-!dist/OpenCodeProviderManager.exe
+!dist/AgentManager.exe
