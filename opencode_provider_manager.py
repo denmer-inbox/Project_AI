@@ -4842,6 +4842,9 @@ class App:
                    command=self.export_profile).pack(side="left", padx=3)
         ttk.Button(row2, text="ИМПОРТ ПРОФИЛЕЙ…",
                    command=self.import_profile).pack(side="left", padx=3)
+        ttk.Button(row2, text="ИМПОРТ В АГЕНТОВ…",
+                   style="Accent.TButton",
+                   command=self.open_agents_dialog).pack(side="left", padx=(12, 3))
         self.btn_aos = ttk.Button(row2, text="AOS: ВЫКЛ",
                                   command=self.toggle_aos)
         self.btn_aos.pack(side="left", padx=(12, 3))
