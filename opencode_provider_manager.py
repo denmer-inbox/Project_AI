@@ -896,6 +896,942 @@ def profiles_from_export(data) -> tuple:
 
 
 # ==========================================================================
+# Перенос профилей в ИИ-агентов
+# ==========================================================================
+#
+# Профили (URL + ключ + модели) уже настроены в OpenCode. Здесь их можно
+# одной кнопкой перенести в конфиги других ИИ-агентов: VS Code (расширение
+# opencode-lm читает тот же opencode.json), Cline, Continue, Codex CLI,
+# Claude Code, Aider. Ручная правка конфигов не нужна.
+
+AGENT_IDS = ("opencode", "vscode", "cline", "continue", "codex", "claude", "aider")
+
+AGENTS_FILE_NAME = "agents.json"
+
+#: Пункты, которые мы дописываем в чужие конфиги: их можно безопасно
+#: перезаписывать, не задевая остальные настройки пользователя.
+CONTINUE_ROLES = ["chat", "edit", "apply"]
+
+VSCODE_EXT_ID = "local.opencode-lm"
+
+
+def merge_profiles_into_config(config: dict, profiles: list) -> dict:
+    """Аккуратно дописывает профили в конфиг, НЕ трогая остальные.
+
+    Нужна для переноса в агентов: там пользователь отмечает произвольный
+    поднабор профилей, и стирать непереданные провайдеры или помечать их
+    модели `disabled` нельзя. Остальные провайдеры, их модели, mcp, agent,
+    skills и прочие ключи остаются как были.
+    """
+    new = copy.deepcopy(config)
+    providers = new.get("providers")
+    if not isinstance(providers, dict):
+        providers = {}
+        new["providers"] = providers
+    for profile in profiles:
+        pid = profile.get("id")
+        if not pid:
+            continue
+        existing = providers.get(pid) if isinstance(providers.get(pid), dict) else {}
+        raw = profile.get("_raw")
+        # основа — то, что уже лежит в конфиге; поверх кладём «сырой» объект
+        # профиля, но модели объединяем, а не заменяем
+        base = copy.deepcopy(existing)
+        if isinstance(raw, dict):
+            for key, value in raw.items():
+                if key == "models":
+                    continue
+                base[key] = copy.deepcopy(value)
+            raw_models = raw.get("models")
+            if isinstance(raw_models, dict):
+                merged = raw_models if isinstance(base.get("models"), dict) else {}
+                for mid, spec in base.get("models", {}).items():
+                    merged.setdefault(mid, spec)
+                base["models"] = merged
+        settings = {}
+        base_url = normalize_base_url(profile.get("base_url", ""))
+        if base_url:
+            settings["baseURL"] = base_url
+        if profile.get("api_key"):
+            settings["apiKey"] = profile["api_key"]
+        for key, value in (profile.get("extra_settings") or {}).items():
+            settings[key] = value
+        base["name"] = profile.get("display_name") or pid
+        base["package"] = profile.get("package") or PACKAGES[0]
+        if settings:
+            base["settings"] = settings
+        coef = str(profile.get("coefficient") or "").strip()
+        if coef:
+            base["_coefficient"] = coef
+        # модели: отмеченные добавляем/включаем, остальные НЕ трогаем.
+        # Скрывать чужие модели здесь нельзя: перенос не должен менять то,
+        # что пользователь не выбирал (иначе пропадали модели из OpenCode).
+        old_models = base.get("models") if isinstance(base.get("models"), dict) else {}
+        old_models = dict(old_models) if isinstance(old_models, dict) else {}
+        for mid in list(profile.get("models") or []):
+            spec = model_spec({"id": mid}, old_models.get(mid))
+            spec.pop("disabled", None)
+            old_models[mid] = spec
+        if old_models:
+            base["models"] = old_models
+        providers[pid] = base
+    return new
+
+
+def agents_settings_path() -> Path:
+    base = Path(os.environ.get("LOCALAPPDATA") or Path.home())
+    return base / "OpenCodeProviderManager" / AGENTS_FILE_NAME
+
+
+def load_agents_settings() -> dict:
+    """Сохранённый выбор агентов и профилей (переживает перезапуск)."""
+    defaults = {"agents": [], "profiles": []}
+    try:
+        path = agents_settings_path()
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+            if isinstance(data, dict):
+                for key in defaults:
+                    if key in data:
+                        defaults[key] = data[key]
+    except Exception:
+        pass
+    return defaults
+
+
+def save_agents_settings(settings: dict) -> None:
+    try:
+        path = agents_settings_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {key: settings.get(key) for key in ("agents", "profiles")}
+        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _home_dir(home=None) -> Path:
+    return Path(home) if home else Path(os.path.expanduser("~"))
+
+
+def vscode_user_dir(home=None) -> Path:
+    if home:
+        return _home_dir(home) / "AppData" / "Roaming" / "Code" / "User"
+    appdata = os.environ.get("APPDATA")
+    base = Path(appdata) if appdata else _home_dir() / "AppData" / "Roaming"
+    return base / "Code" / "User"
+
+
+def vscode_settings_path(home=None) -> Path:
+    return vscode_user_dir(home) / "settings.json"
+
+
+def vscode_extensions_dir(home=None) -> Path:
+    """Каталог расширений VS Code (stable)."""
+    return _home_dir(home) / ".vscode" / "extensions"
+
+
+def vscode_lm_source_dir(home=None) -> Path:
+    """Исходники расширения opencode-lm (если лежат рядом с домашней папкой)."""
+    return _home_dir(home) / "opencode-lm-vscode"
+
+
+def continue_config_path(home=None) -> Path:
+    return _home_dir(home) / ".continue" / "config.yaml"
+
+
+def codex_config_path(home=None) -> Path:
+    return _home_dir(home) / ".codex" / "config.toml"
+
+
+def claude_settings_path(home=None) -> Path:
+    return _home_dir(home) / ".claude" / "settings.json"
+
+
+def aider_config_path(home=None) -> Path:
+    return _home_dir(home) / ".aider.conf.yml"
+
+
+def cline_providers_path(home=None) -> Path:
+    """Cline хранит провайдеров в ~/.cline/data/settings/providers.json."""
+    return _home_dir(home) / ".cline" / "data" / "settings" / "providers.json"
+
+
+def cline_models_path(home=None) -> Path:
+    return cline_providers_path(home).parent / "models.json"
+
+
+def cline_dir(home=None) -> Path:
+    return _home_dir(home) / ".cline"
+
+
+def agent_catalog(home=None, config_path=None) -> list:
+    """Список ИИ-агентов для диалога переноса (порядок = AGENT_IDS)."""
+    home = _home_dir(home)
+    config = _resolve_config_path(config_path, home)
+    items = [
+        {
+            "id": "opencode",
+            "title": "OpenCode (этот конфиг)",
+            "path": config,
+            "kind": "config",
+            "description": "Записать профили в opencode.json — тот же файл читают OpenCode и расширения VS Code.",
+        },
+        {
+            "id": "vscode",
+            "title": "VS Code (чат-модели)",
+            "path": config,
+            "kind": "config",
+            "description": "Поставить расширение OpenCode LM и подключить его к этому же конфигу — профили появятся в пикере моделей VS Code.",
+            "extension": VSCODE_EXT_ID,
+        },
+        {
+            "id": "cline",
+            "title": "Cline (VS Code, ~/.cline)",
+            "path": cline_providers_path(home),
+            "kind": "config",
+            "description": "Прописать профили в providers.json Cline (openai-compatible) и models.json.",
+        },
+        {
+            "id": "continue",
+            "title": "Continue (.continue/config.yaml)",
+            "path": continue_config_path(home),
+            "kind": "config",
+            "description": "Дописать модели как openai-совместимые провайдеры Continue.",
+        },
+        {
+            "id": "codex",
+            "title": "Codex CLI (~/.codex/config.toml)",
+            "path": codex_config_path(home),
+            "kind": "config",
+            "description": "Добавить блоки [model_providers.*] и bearer-токены.",
+        },
+        {
+            "id": "claude",
+            "title": "Claude Code (~/.claude/settings.json)",
+            "path": claude_settings_path(home),
+            "kind": "config",
+            "description": "Прописать ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_MODEL.",
+        },
+        {
+            "id": "aider",
+            "title": "Aider (~/.aider.conf.yml)",
+            "path": aider_config_path(home),
+            "kind": "config",
+            "description": "openai-api-base, openai-api-key и модель по умолчанию.",
+        },
+    ]
+    catalog = []
+    for item in items:
+        entry = dict(item)
+        if entry["id"] == "vscode":
+            entry["exists"] = _vscode_extension_installed(home)
+        else:
+            entry["exists"] = Path(entry["path"]).exists()
+        catalog.append(entry)
+    return catalog
+
+
+def _backup_file(path: Path):
+    """Копия файла перед изменением. Возвращает путь копии или None."""
+    try:
+        if not path.exists():
+            return None
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
+        dest = path.with_name("%s.bak-%s" % (path.name, stamp))
+        shutil.copy2(path, dest)
+        return dest
+    except Exception:
+        return None
+
+
+def _atomic_write(path: Path, text: str):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8", newline="\n")
+    os.replace(tmp, path)
+
+
+def _read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8-sig")
+    except FileNotFoundError:
+        return ""
+
+
+def _yaml_available() -> bool:
+    try:
+        import yaml  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def _load_yaml_doc(text: str) -> dict:
+    """Разбирает YAML. Без PyYAML — считаем, что файла нет."""
+    if not text.strip():
+        return {}
+    try:
+        import yaml
+    except Exception:
+        return {}
+    try:
+        data = yaml.safe_load(text)
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _dump_yaml_doc(data: dict) -> str:
+    """YAML через PyYAML; если его нет — минимальный YAML руками.
+
+    Ручная запись безопасна только для файлов, которые мы создаём сами:
+    разбор существующего файла требует PyYAML (см. _require_yaml).
+    """
+    try:
+        import yaml
+        return yaml.safe_dump(data, allow_unicode=True, sort_keys=False,
+                              default_flow_style=False)
+    except Exception:
+        return _dump_minimal_yaml(data)
+
+
+def _dump_minimal_yaml(data: dict) -> str:
+    lines = []
+    for key, value in data.items():
+        if isinstance(value, list):
+            if not value:
+                lines.append("%s: []" % key)
+                continue
+            lines.append("%s:" % key)
+            for item in value:
+                if not isinstance(item, dict):
+                    lines.append("  - %s" % json.dumps(item, ensure_ascii=False))
+                    continue
+                first = True
+                for sub_key, sub_value in item.items():
+                    prefix = "  - " if first else "    "
+                    first = False
+                    if isinstance(sub_value, list):
+                        lines.append("%s%s:" % (prefix, sub_key))
+                        for sub_item in sub_value:
+                            lines.append("      - %s" % sub_item)
+                    else:
+                        lines.append("%s%s: %s" % (
+                            prefix, sub_key,
+                            json.dumps(sub_value, ensure_ascii=False)))
+            continue
+        lines.append("%s: %s" % (key, json.dumps(value, ensure_ascii=False)))
+    return "\n".join(lines) + "\n"
+
+
+def _require_yaml(text: str, path: Path) -> dict:
+    """Разбор YAML для правки существующего файла.
+
+    Если PyYAML нет, а файл непустой — лучше отказаться, чем затереть чужие
+    настройки: в отчёте будет понятная ошибка.
+    """
+    if not text.strip():
+        return {}
+    if not _yaml_available():
+        raise RuntimeError(
+            "нужен PyYAML, чтобы не затереть %s — установите: pip install pyyaml" % path)
+    data = _load_yaml_doc(text)
+    if not data:
+        raise RuntimeError("%s не разбирается как YAML — файл не тронут" % path)
+    return data
+
+
+def _profiles_for_transfer(profiles, ids=None) -> list:
+    if not ids:
+        return [p for p in profiles if p.get("base_url")]
+    wanted = set(ids)
+    return [p for p in profiles if p.get("id") in wanted and p.get("base_url")]
+
+
+def _pick_primary(profiles, default_model=""):
+    """Профиль, который станет «моделью по умолчанию» у агента с одной моделью."""
+    if not profiles:
+        return None
+    pid = parse_model_ref(default_model)[0]
+    if pid:
+        for profile in profiles:
+            if profile.get("id") == pid:
+                return profile
+    for profile in profiles:
+        if profile.get("models"):
+            return profile
+    return profiles[0]
+
+
+def _primary_model(profile, default_model="") -> str:
+    models = list((profile or {}).get("models") or [])
+    pid, mid = parse_model_ref(default_model)
+    if profile and pid == profile.get("id") and mid in models:
+        return mid
+    return models[0] if models else ""
+
+
+def _provider_kind(package: str, base_url: str = "") -> str:
+    package = (package or "").lower()
+    if "anthropic" in package:
+        return "anthropic"
+    if "google" in package or "gemini" in package:
+        return "gemini"
+    if "openai" in package:
+        return "openai"
+    return "openai"
+
+
+def _env_key(pid: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9]+", "_", str(pid)).strip("_").upper() or "PROVIDER"
+    return "OPENCODE_%s_API_KEY" % safe
+
+
+def _toml_quote(value) -> str:
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def _resolve_config_path(config_path, home=None) -> Path:
+    """Путь к opencode.json: явный, затем <home>/.config/opencode, затем реальный."""
+    if config_path:
+        return Path(config_path)
+    if home is not None:
+        return _home_dir(home) / ".config" / "opencode" / "opencode.json"
+    return default_config_path()
+
+
+def _transfer_opencode(profiles, default_model, config_path=None, home=None):
+    """Дописывает профили в opencode.json, не затирая остальные провайдеры."""
+    path = Path(config_path) if config_path else _resolve_config_path(None, home)
+    config = load_config(path)
+    new_config = merge_profiles_into_config(config, profiles)
+    ref = (default_model or "").strip()
+    if ref and ref != "(не задана)":
+        new_config["model"] = ref
+    backup = save_config(path, new_config)
+    return {
+        "agent": "opencode", "title": "OpenCode (этот конфиг)", "ok": True,
+        "path": path, "backup": backup,
+        "message": "Записано профилей: %d (остальные не тронуты)" % len(profiles),
+    }
+
+
+def _vscode_extension_dir(home=None):
+    """Папка установленного расширения opencode-lm (или None)."""
+    base = vscode_extensions_dir(home)
+    try:
+        dirs = sorted(p for p in base.glob(VSCODE_EXT_ID + "-*") if p.is_dir())
+    except Exception:
+        return None
+    return dirs[-1] if dirs else None
+
+
+def _vscode_extension_installed(home=None) -> bool:
+    return _vscode_extension_dir(home) is not None
+
+
+def find_vscode_vsix(home=None):
+    """Ищем собранный .vsix рядом с исходниками расширения."""
+    src = vscode_lm_source_dir(home)
+    for pattern in ("*.vsix", "extension/*.vsix"):
+        try:
+            found = sorted(src.glob(pattern))
+        except Exception:
+            found = []
+        if found:
+            return found[-1]
+    return None
+
+
+def _vscode_cli_candidates(home=None):
+    """Как запустить установку расширения: CLI VS Code или node cli.js."""
+    roots = []
+    local = os.environ.get("LOCALAPPDATA")
+    if local and not home:
+        roots.append(Path(local) / "Programs" / "Microsoft VS Code")
+    pf = os.environ.get("ProgramFiles")
+    if pf and not home:
+        roots.append(Path(pf) / "Microsoft VS Code")
+    pfx86 = os.environ.get("ProgramFiles(x86)")
+    if pfx86 and not home:
+        roots.append(Path(pfx86) / "Microsoft VS Code")
+    candidates = []
+    for root in roots:
+        try:
+            if not root.is_dir():
+                continue
+            for sub in root.iterdir():
+                cli = sub / "resources" / "app" / "out" / "cli.js"
+                if cli.is_file():
+                    candidates.append(("node", cli))
+        except Exception:
+            continue
+        cmd = root / "bin" / "code.cmd"
+        if cmd.is_file():
+            candidates.append(("cmd", cmd))
+    return candidates
+
+
+def _run_cli_install(kind, cli_path, vsix, extensions_dir):
+    """Пробуем официальный CLI. Возвращает (ok, вывод)."""
+    import subprocess
+    if kind == "node":
+        cmd = ["node", str(cli_path)]
+    else:
+        cmd = ["cmd", "/c", str(cli_path)]
+    cmd += ["--extensions-dir", str(extensions_dir),
+            "--install-extension", str(vsix), "--force"]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180,
+                              encoding="utf-8", errors="replace")
+    except Exception as exc:
+        return False, str(exc)
+    out = ((proc.stdout or "") + (proc.stderr or "")).strip()
+    ok = proc.returncode == 0 and re.search(r"successfully installed|already installed", out, re.I)
+    return bool(ok), out
+
+
+def _register_extension(ext_dir: Path, extensions_json: Path, version: str):
+    """Дописывает запись в extensions.json (UTF-8 без BOM, массив)."""
+    entries = []
+    if extensions_json.exists() and extensions_json.stat().st_size > 0:
+        try:
+            data = json.loads(extensions_json.read_text(encoding="utf-8-sig"))
+            if isinstance(data, list):
+                entries = [e for e in data
+                           if not (isinstance(e, dict)
+                                   and (e.get("identifier") or {}).get("id") == VSCODE_EXT_ID)]
+        except Exception:
+            backup = extensions_json.with_name(
+                extensions_json.name + ".broken-" + datetime.now().strftime("%Y%m%d%H%M%S"))
+            try:
+                shutil.copy2(extensions_json, backup)
+            except Exception:
+                pass
+    uri = "/" + str(ext_dir.resolve()).replace("\\", "/").lstrip("/")
+    entries.append({
+        "identifier": {"id": VSCODE_EXT_ID,
+                       "uuid": "8f3c1c2e-4a55-4c07-9d3b-3f0a6d5e7b21"},
+        "version": version,
+        "location": {"$mid": 1, "path": uri, "scheme": "file"},
+        "relativeLocation": ext_dir.name,
+        "metadata": {
+            "source": "vsix",
+            "installedTimestamp": int(datetime.now().timestamp() * 1000),
+            "pinned": False,
+            "updated": True,
+            "private": True,
+            "isPreReleaseVersion": False,
+            "preRelease": False,
+        },
+    })
+    extensions_json.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_write(extensions_json, json.dumps(entries, ensure_ascii=False, separators=(",", ":")))
+
+
+def _install_extension_from_vsix(vsix: Path, home=None):
+    """Ставит расширение копированием из .vsix (fallback без CLI)."""
+    import zipfile
+    extensions_dir = vscode_extensions_dir(home)
+    extensions_dir.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(vsix) as zf:
+        names = zf.namelist()
+        try:
+            manifest = zf.read("extension/package.json").decode("utf-8-sig")
+            version = str(json.loads(manifest).get("version") or "1.0.0")
+        except Exception:
+            version = "1.0.0"
+        target = extensions_dir / ("%s-%s" % (VSCODE_EXT_ID, version))
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
+        for name in names:
+            if not name.startswith("extension/") or name.endswith("/"):
+                continue
+            rel = name[len("extension/"):]
+            dest = target / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(name) as src, open(dest, "wb") as out:
+                shutil.copyfileobj(src, out)
+        # VS Code ищет скрытый .vsixmanifest именно с точкой
+        if "extension.vsixmanifest" in names:
+            (target / ".vsixmanifest").write_bytes(zf.read("extension.vsixmanifest"))
+    _register_extension(target, extensions_dir / "extensions.json", version)
+    return target
+
+
+def _ensure_vscode_extension(home=None) -> str:
+    """Ставит opencode-lm, если его нет. Возвращает текст для отчёта."""
+    if _vscode_extension_installed(home):
+        found = _vscode_extension_dir(home)
+        return "Расширение уже установлено: %s" % found.name
+    vsix = find_vscode_vsix(home)
+    if vsix is None:
+        return ("Расширение не установлено и .vsix не найден — "
+                "положите opencode-lm-*.vsix в %s" % vscode_lm_source_dir(home))
+    extensions_dir = vscode_extensions_dir(home)
+    for kind, cli in _vscode_cli_candidates(home):
+        ok, out = _run_cli_install(kind, cli, vsix, extensions_dir)
+        if ok and _vscode_extension_installed(home):
+            return "Расширение установлено через CLI: %s" % vsix.name
+    try:
+        target = _install_extension_from_vsix(vsix, home)
+    except Exception as exc:
+        return "Не удалось установить расширение: %s" % exc
+    return "Расширение установлено: %s" % target.name
+
+
+def _patch_vscode_settings(settings_path: Path, config_path) -> str:
+    """Прописывает opencodeLM.configPath в settings.json, не ломая остальное.
+
+    Если файл содержит комментарии (JSONC), он не перезаписывается целиком:
+    строка вставляется сразу после открывающей скобки, чтобы комментарии
+    и форматирование пользователя остались на месте.
+    """
+    text = _read_text(settings_path)
+    if not text.strip():
+        data = {"opencodeLM.configPath": str(config_path)}
+        _atomic_write(settings_path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+        return "settings.json создан"
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        try:
+            data = json.loads(strip_jsonc(text))
+        except Exception:
+            return "settings.json не разбирается — пропущен (задайте путь вручную)"
+        if not isinstance(data, dict):
+            return "settings.json не является объектом — пропущен"
+        if data.get("opencodeLM.configPath") == str(config_path):
+            return "opencodeLM.configPath уже указывает на конфиг"
+        insert_at = text.find("{")
+        if insert_at < 0:
+            return "settings.json без открывающей скобки — пропущен"
+        line = '\n    "opencodeLM.configPath": %s,' % json.dumps(
+            str(config_path), ensure_ascii=False)
+        patched = text[:insert_at + 1] + line + text[insert_at + 1:]
+        _backup_file(settings_path)
+        _atomic_write(settings_path, patched)
+        return "opencodeLM.configPath = %s (комментарии сохранены)" % config_path
+    if not isinstance(data, dict):
+        return "settings.json не является объектом — пропущен"
+    if config_path and data.get("opencodeLM.configPath") != str(config_path):
+        data["opencodeLM.configPath"] = str(config_path)
+        _backup_file(settings_path)
+        _atomic_write(settings_path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+        return "opencodeLM.configPath = %s" % config_path
+    return "opencodeLM.configPath уже указывает на конфиг"
+
+
+def _transfer_vscode(profiles, default_model, config_path=None, home=None):
+    """VS Code: профили уже лежат в opencode.json — расширение читает их оттуда.
+
+    Поэтому перенос = поставить расширение opencode-lm (если его нет) и
+    прописать ему путь к конфигу. Ключи никуда не копируются.
+    """
+    config = _resolve_config_path(config_path, home)
+    notes = [_ensure_vscode_extension(home)]
+    try:
+        notes.append(_patch_vscode_settings(vscode_settings_path(home), config))
+    except Exception as exc:
+        notes.append("settings.json не изменён: %s" % exc)
+    notes.append("Профили берутся из %s" % config)
+    return {
+        "agent": "vscode", "title": "VS Code (чат-модели)", "ok": True,
+        "path": config, "backup": None, "message": "; ".join(notes),
+    }
+
+
+def _transfer_cline(profiles, default_model, home=None):
+    """Cline: providers.json (формат v4) + models.json со списком моделей."""
+    path = cline_providers_path(home)
+    text = _read_text(path)
+    try:
+        data = json.loads(text) if text.strip() else {}
+    except json.JSONDecodeError:
+        try:
+            data = json.loads(strip_jsonc(text))
+        except Exception as exc:
+            raise RuntimeError("providers.json не разбирается: %s" % exc)
+    if not isinstance(data, dict):
+        raise RuntimeError("providers.json не является объектом JSON")
+    data.setdefault("version", 1)
+    providers = data.get("providers")
+    if not isinstance(providers, dict):
+        providers = {}
+    now = datetime.now().astimezone().isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    for profile in profiles:
+        pid = str(profile.get("id") or "")
+        settings = {
+            "provider": "openai-compatible",
+            "apiKey": profile.get("api_key") or "",
+            "model": _primary_model(profile, default_model),
+            "baseUrl": profile.get("base_url"),
+            "headers": {},
+            "reasoning": {"enabled": False},
+        }
+        previous = providers.get(pid) if isinstance(providers.get(pid), dict) else {}
+        entry = dict(previous)
+        entry["settings"] = settings
+        entry["updatedAt"] = now
+        entry["tokenSource"] = "manual"
+        providers[pid] = entry
+    data["providers"] = providers
+    primary = _pick_primary(profiles, default_model)
+    if primary is not None:
+        data["lastUsedProvider"] = str(primary.get("id"))
+    data.setdefault("modes", {})
+    _backup_file(path)
+    _atomic_write(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+
+    # список моделей: Cline берёт оттуда supportsVision и т.п.
+    models_path = cline_models_path(home)
+    try:
+        models_doc = json.loads(_read_text(models_path) or "{}")
+    except Exception:
+        models_doc = {}
+    if not isinstance(models_doc, dict):
+        models_doc = {}
+    models_doc.setdefault("version", 1)
+    per_provider = models_doc.get("providers")
+    if not isinstance(per_provider, dict):
+        per_provider = {}
+    for profile in profiles:
+        pid = str(profile.get("id") or "")
+        entry = per_provider.get(pid) if isinstance(per_provider.get(pid), dict) else {}
+        known = entry.get("models") if isinstance(entry.get("models"), dict) else {}
+        for mid in profile.get("models") or []:
+            spec = known.get(mid) if isinstance(known.get(mid), dict) else {}
+            spec["supportsVision"] = False
+            known[mid] = spec
+        entry["models"] = known
+        per_provider[pid] = entry
+    models_doc["providers"] = per_provider
+    _backup_file(models_path)
+    _atomic_write(models_path, json.dumps(models_doc, indent=2, ensure_ascii=False) + "\n")
+
+    count = sum(len(p.get("models") or []) for p in profiles)
+    return {
+        "agent": "cline", "title": "Cline", "ok": True, "path": path,
+        "backup": None,
+        "message": "Провайдеров: %d, моделей: %d" % (len(profiles), count),
+    }
+
+
+def _transfer_continue(profiles, default_model, home=None):
+    path = continue_config_path(home)
+    doc = _require_yaml(_read_text(path), path)
+    if not doc:
+        doc = {"name": "Local Config", "version": "1.0.0", "schema": "v1"}
+    old = doc.get("models")
+    models = list(old) if isinstance(old, list) else []
+    ours_bases = {p.get("base_url") for p in profiles if p.get("base_url")}
+
+    def is_ours(entry):
+        return isinstance(entry, dict) and entry.get("apiBase") in ours_bases
+
+    kept = [m for m in models if not is_ours(m)]
+    added = 0
+    for profile in profiles:
+        kind = _provider_kind(profile.get("package"), profile.get("base_url"))
+        for mid in profile.get("models") or []:
+            kept.append({
+                "name": "%s · %s" % (profile.get("display_name") or profile.get("id"), mid),
+                "provider": kind,
+                "model": mid,
+                "apiBase": profile.get("base_url"),
+                "apiKey": profile.get("api_key") or "",
+                "roles": list(CONTINUE_ROLES),
+            })
+            added += 1
+    doc["models"] = kept
+    _backup_file(path)
+    _atomic_write(path, _dump_yaml_doc(doc))
+    return {
+        "agent": "continue", "title": "Continue", "ok": True, "path": path,
+        "backup": None,
+        "message": "Моделей добавлено: %d, всего: %d" % (added, len(kept)),
+    }
+
+
+def _toml_top_level_lines(text: str) -> tuple:
+    lines = text.splitlines()
+    split = len(lines)
+    for idx, line in enumerate(lines):
+        if line.lstrip().startswith("["):
+            split = idx
+            break
+    return lines[:split], lines[split:]
+
+
+def _toml_set_top_level(text: str, values: dict) -> str:
+    head, body = _toml_top_level_lines(text)
+    keep = []
+    for line in head:
+        stripped = line.strip()
+        if any(stripped.startswith("%s =" % key) or stripped.startswith("%s=" % key)
+               for key in values):
+            continue
+        keep.append(line)
+    while keep and not keep[0].strip():
+        keep.pop(0)
+    prefix = ["%s = %s" % (key, _toml_quote(value)) for key, value in values.items()]
+    result = prefix + keep
+    if body:
+        result = result + [""] + body
+    return "\n".join(result).strip("\n") + "\n"
+
+
+def _toml_drop_tables(text: str, headers) -> str:
+    lines = text.splitlines()
+    out = []
+    skipping = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[") and not stripped.startswith("[["):
+            skipping = stripped in headers
+            if skipping:
+                continue
+        elif stripped.startswith("[["):
+            skipping = False
+        if skipping:
+            continue
+        out.append(line)
+    while out and not out[-1].strip():
+        out.pop()
+    return "\n".join(out)
+
+
+def _transfer_codex(profiles, default_model, home=None):
+    path = codex_config_path(home)
+    text = _read_text(path)
+    headers = {"[model_providers.%s]" % p.get("id") for p in profiles}
+    body = _toml_drop_tables(text, headers)
+    blocks = []
+    for profile in profiles:
+        pid = str(profile.get("id") or "")
+        blocks.append("[model_providers.%s]" % pid)
+        blocks.append("name = %s" % _toml_quote(profile.get("display_name") or pid))
+        blocks.append("base_url = %s" % _toml_quote(profile.get("base_url")))
+        blocks.append("wire_api = \"chat\"")
+        blocks.append("env_key = %s" % _toml_quote(_env_key(pid)))
+        if profile.get("api_key"):
+            blocks.append("experimental_bearer_token = %s" % _toml_quote(profile["api_key"]))
+        blocks.append("")
+    merged = (body.rstrip() + "\n\n" + "\n".join(blocks)).strip("\n") + "\n"
+    primary = _pick_primary(profiles, default_model)
+    if primary is not None:
+        model = _primary_model(primary, default_model)
+        values = {"model_provider": primary.get("id")}
+        if model:
+            values["model"] = model
+        merged = _toml_set_top_level(merged, values)
+    _backup_file(path)
+    _atomic_write(path, merged)
+    return {
+        "agent": "codex", "title": "Codex CLI", "ok": True, "path": path,
+        "backup": None,
+        "message": "Провайдеров записано: %d" % len(profiles),
+    }
+
+
+def _transfer_claude(profiles, default_model, home=None):
+    path = claude_settings_path(home)
+    text = _read_text(path)
+    try:
+        data = json.loads(text) if text.strip() else {}
+    except json.JSONDecodeError:
+        try:
+            data = json.loads(strip_jsonc(text))
+        except Exception as exc:
+            raise RuntimeError("settings.json не разбирается: %s" % exc)
+    if not isinstance(data, dict):
+        raise RuntimeError("settings.json не является объектом JSON")
+    primary = _pick_primary(profiles, default_model)
+    if primary is None:
+        raise RuntimeError("нет профилей с baseURL")
+    env = data.get("env") if isinstance(data.get("env"), dict) else {}
+    env["ANTHROPIC_BASE_URL"] = primary.get("base_url")
+    if primary.get("api_key"):
+        env["ANTHROPIC_AUTH_TOKEN"] = primary["api_key"]
+        env["ANTHROPIC_API_KEY"] = primary["api_key"]
+    model = _primary_model(primary, default_model)
+    if model:
+        env["ANTHROPIC_MODEL"] = model
+    data["env"] = env
+    _backup_file(path)
+    _atomic_write(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    return {
+        "agent": "claude", "title": "Claude Code", "ok": True, "path": path,
+        "backup": None,
+        "message": "%s → %s" % (primary.get("id"), model or "(модель не задана)"),
+    }
+
+
+def _transfer_aider(profiles, default_model, home=None):
+    path = aider_config_path(home)
+    doc = _require_yaml(_read_text(path), path)
+    primary = _pick_primary(profiles, default_model)
+    if primary is None:
+        raise RuntimeError("нет профилей с baseURL")
+    model = _primary_model(primary, default_model)
+    doc["openai-api-base"] = primary.get("base_url")
+    if primary.get("api_key"):
+        doc["openai-api-key"] = primary["api_key"]
+    if model:
+        doc["model"] = "openai/%s" % model
+    _backup_file(path)
+    _atomic_write(path, _dump_yaml_doc(doc))
+    return {
+        "agent": "aider", "title": "Aider", "ok": True, "path": path,
+        "backup": None,
+        "message": "%s → %s" % (primary.get("id"), model or "(модель не задана)"),
+    }
+
+
+TRANSFER_WRITERS = {
+    "opencode": _transfer_opencode,
+    "vscode": _transfer_vscode,
+    "cline": _transfer_cline,
+    "continue": _transfer_continue,
+    "codex": _transfer_codex,
+    "claude": _transfer_claude,
+    "aider": _transfer_aider,
+}
+
+
+def transfer_profiles(profiles, default_model="", agent_ids=None, home=None,
+                      config_path=None):
+    """Переносит выбранные профили в выбранных ИИ-агентов.
+
+    Возвращает список результатов: {"agent", "title", "ok", "path",
+    "message"} — по одному на каждого запрошенного агента.
+    """
+    selected = [a for a in (agent_ids or []) if a in TRANSFER_WRITERS]
+    selected.sort(key=lambda a: AGENT_IDS.index(a) if a in AGENT_IDS else 99)
+    targets = _profiles_for_transfer(profiles)
+    results = []
+    if not targets:
+        return [{"agent": "—", "title": "—", "ok": False, "path": None,
+                 "message": "нет профилей с baseURL"}]
+    for agent in selected:
+        writer = TRANSFER_WRITERS[agent]
+        try:
+            if agent == "opencode":
+                result = writer(targets, default_model, config_path=config_path,
+                                home=home)
+            elif agent == "vscode":
+                result = writer(targets, default_model, config_path=config_path,
+                                home=home)
+            else:
+                result = writer(targets, default_model, home=home)
+        except Exception as exc:
+            result = {"agent": agent, "title": agent, "ok": False, "path": None,
+                      "backup": None, "message": str(exc)}
+        results.append(result)
+    return results
+
+
+# ==========================================================================
 # Диалог профиля
 # ==========================================================================
 
@@ -3351,6 +4287,336 @@ class AOSSettingsDialog(tk.Toplevel):
         self.destroy()
 
 
+class AgentsDialog(tk.Toplevel):
+    """Перенос профилей в ИИ-агентов: галочки агентов и профилей + импорт."""
+
+    def __init__(self, app, home=None):
+        super().__init__(app.root)
+        self.app = app
+        self.title("ПЕРЕНОС ПРОФИЛЕЙ В ИИ-АГЕНТОВ")
+        self.geometry("900x760")
+        self.minsize(780, 620)
+        self.configure(bg=T.bg)
+        self.transient(app.root)
+        self.grab_set()
+
+        saved = load_agents_settings()
+        saved_agents = [a for a in (saved.get("agents") or []) if a in AGENT_IDS]
+        saved_profiles = list(saved.get("profiles") or [])
+        self.agent_vars = {}
+        self.profile_vars = {}
+        self.var_profile_filter = tk.StringVar(master=self)
+        self.var_profile_filter.trace_add("write", lambda *a: self._render_profiles())
+        self._result = None
+        self.home = home          # подменяется в тестах: куда писать конфиги
+
+        self.catalog = agent_catalog(home=self.home,
+                                     config_path=str(app.config_path))
+
+        for item in self.catalog:
+            self.agent_vars[item["id"]] = tk.BooleanVar(
+                master=self, value=(item["id"] in saved_agents))
+        for profile in app.profiles:
+            self.profile_vars[profile["id"]] = tk.BooleanVar(
+                master=self, value=(profile["id"] in saved_profiles or not saved_profiles))
+
+        self._build()
+        try:
+            app.clipboard.bind_tree(self)
+        except Exception:
+            pass
+        self.bind("<Escape>", lambda e: self.destroy())
+
+    # --- UI ---------------------------------------------------------------
+    def _build(self):
+        head = tk.Frame(self, bg=T.bg)
+        head.pack(fill="x", padx=16, pady=(14, 2))
+        tk.Label(head, text="ПЕРЕНОС ПРОФИЛЕЙ В ИИ-АГЕНТОВ", bg=T.bg, fg=T.cyan,
+                 font=T.mono_title).pack(anchor="w")
+        tk.Label(head, text="Отметьте агентов и профили — профили попадут в конфиги агентов.",
+                 bg=T.bg, fg=T.ink_dim, font=T.mono_small).pack(anchor="w", pady=(2, 0))
+        ScanStrip(self, color=T.cyan).pack(fill="x", padx=16, pady=(6, 6))
+
+        mid = tk.Frame(self, bg=T.bg)
+        mid.pack(fill="both", expand=True, padx=16)
+        mid.columnconfigure(0, weight=1)
+        mid.columnconfigure(1, weight=1)
+        mid.rowconfigure(0, weight=1)
+
+        # агенты
+        apanel = RoundedPanel(mid, radius=16, fill=T.bg_panel, outline=T.cyan_dim,
+                              thickness=1, bg=T.bg)
+        apanel.grid(row=0, column=0, sticky="nsew", padx=(0, 6), pady=2)
+        abox = apanel.inner
+        ahead = tk.Frame(abox, bg=T.bg_panel)
+        ahead.pack(fill="x", padx=10, pady=(8, 4))
+        tk.Label(ahead, text="ИИ-АГЕНТЫ", bg=T.bg_panel, fg=T.cyan,
+                 font=T.mono_title).pack(side="left")
+        self.lbl_agents = tk.Label(ahead, text="", bg=T.bg_panel, fg=T.amber,
+                                   font=T.mono_small)
+        self.lbl_agents.pack(side="right")
+
+        arow = tk.Frame(abox, bg=T.bg_panel)
+        arow.pack(fill="x", padx=10, pady=(0, 6))
+        ttk.Button(arow, text="☑ ВСЕ", width=8, style="Accent.TButton",
+                   command=lambda: self._set_agents(True)).pack(side="left", padx=2)
+        ttk.Button(arow, text="☐ НИЧЕГО", width=10,
+                   command=lambda: self._set_agents(False)).pack(side="left", padx=2)
+
+        self._agent_canvas = tk.Canvas(abox, bg=T.bg_panel, highlightthickness=0)
+        asb = ttk.Scrollbar(abox, orient="vertical", command=self._agent_canvas.yview)
+        self._agent_canvas.configure(yscrollcommand=asb.set)
+        self._agent_inner = tk.Frame(self._agent_canvas, bg=T.bg_panel)
+        self._agent_window = self._agent_canvas.create_window(
+            (0, 0), window=self._agent_inner, anchor="nw")
+        self._agent_inner.bind(
+            "<Configure>",
+            lambda e: self._agent_canvas.configure(
+                scrollregion=self._agent_canvas.bbox("all")))
+        self._agent_canvas.bind(
+            "<Configure>",
+            lambda e: self._agent_canvas.itemconfigure(self._agent_window, width=e.width))
+        self._agent_canvas.pack(fill="both", expand=True, padx=(10, 0), pady=(0, 8))
+        asb.pack(side="right", fill="y", padx=(0, 10), pady=(0, 8))
+        self._agent_canvas.bind("<Enter>", self._bind_agent_wheel)
+        self._agent_canvas.bind("<Leave>", self._unbind_agent_wheel)
+        self._render_agents()
+
+        # профили
+        ppanel = RoundedPanel(mid, radius=16, fill=T.bg_panel, outline=T.cyan_dim,
+                              thickness=1, bg=T.bg)
+        ppanel.grid(row=0, column=1, sticky="nsew", padx=(6, 0), pady=2)
+        pbox = ppanel.inner
+        phead = tk.Frame(pbox, bg=T.bg_panel)
+        phead.pack(fill="x", padx=10, pady=(8, 4))
+        tk.Label(phead, text="ПРОФИЛИ ДЛЯ ПЕРЕНОСА", bg=T.bg_panel, fg=T.cyan,
+                 font=T.mono_title).pack(side="left")
+        self.lbl_profiles = tk.Label(phead, text="", bg=T.bg_panel, fg=T.amber,
+                                     font=T.mono_small)
+        self.lbl_profiles.pack(side="right")
+
+        prow = tk.Frame(pbox, bg=T.bg_panel)
+        prow.pack(fill="x", padx=10, pady=(0, 4))
+        ttk.Button(prow, text="☑ ВСЕ", width=8, style="Accent.TButton",
+                   command=lambda: self._set_profiles(True)).pack(side="left", padx=2)
+        ttk.Button(prow, text="☐ НИЧЕГО", width=10,
+                   command=lambda: self._set_profiles(False)).pack(side="left", padx=2)
+        ttk.Entry(prow, textvariable=self.var_profile_filter, font=T.mono,
+                  width=18).pack(side="right", padx=2)
+
+        self._profile_canvas = tk.Canvas(pbox, bg=T.bg_panel, highlightthickness=0)
+        psb = ttk.Scrollbar(pbox, orient="vertical", command=self._profile_canvas.yview)
+        self._profile_canvas.configure(yscrollcommand=psb.set)
+        self._profile_inner = tk.Frame(self._profile_canvas, bg=T.bg_panel)
+        self._profile_window = self._profile_canvas.create_window(
+            (0, 0), window=self._profile_inner, anchor="nw")
+        self._profile_inner.bind(
+            "<Configure>",
+            lambda e: self._profile_canvas.configure(
+                scrollregion=self._profile_canvas.bbox("all")))
+        self._profile_canvas.bind(
+            "<Configure>",
+            lambda e: self._profile_canvas.itemconfigure(self._profile_window,
+                                                         width=e.width))
+        self._profile_canvas.pack(fill="both", expand=True, padx=(10, 0), pady=(0, 8))
+        psb.pack(side="right", fill="y", padx=(0, 10), pady=(0, 8))
+        self._profile_canvas.bind("<Enter>", self._bind_profile_wheel)
+        self._profile_canvas.bind("<Leave>", self._unbind_profile_wheel)
+        self._render_profiles()
+
+        rep_panel = RoundedPanel(self, radius=12, fill=T.bg_panel, outline=T.line,
+                                 thickness=1, bg=T.bg, height=104)
+        rep_panel.pack(fill="x", padx=16, pady=(6, 0))
+        rep_box = rep_panel.inner
+        self.txt_report = tk.Text(rep_box, height=5, bg=T.bg_panel, fg=T.cyan_soft,
+                                  font=T.mono_small, relief="flat", bd=0, wrap="word",
+                                  highlightthickness=0, insertbackground=T.cyan)
+        rsb = ttk.Scrollbar(rep_box, orient="vertical", command=self.txt_report.yview)
+        self.txt_report.configure(yscrollcommand=rsb.set)
+        self.txt_report.pack(side="left", fill="both", expand=True)
+        rsb.pack(side="right", fill="y")
+        self.txt_report.insert("1.0", "Отметьте агентов и профили, затем «ИМПОРТ В АГЕНТОВ».")
+        self.txt_report.configure(state="disabled")
+
+        foot = tk.Frame(self, bg=T.bg)
+        foot.pack(fill="x", padx=16, pady=(8, 12), side="bottom")
+        ttk.Button(foot, text="ЗАКРЫТЬ", command=self.destroy).pack(side="right", padx=4)
+        self.btn_import = ttk.Button(foot, text="ИМПОРТ В АГЕНТОВ",
+                                     style="Accent.TButton", command=self._import)
+        self.btn_import.pack(side="right", padx=4)
+        ttk.Button(foot, text="ТОЛЬКО ОТЧЁТ (ПРОВЕРКА)",
+                   command=lambda: self._import(dry_run=True)).pack(side="left", padx=4)
+
+    def _bind_agent_wheel(self, _=None):
+        self._agent_canvas.bind_all("<MouseWheel>", self._on_agent_wheel)
+
+    def _unbind_agent_wheel(self, _=None):
+        try:
+            self._agent_canvas.unbind_all("<MouseWheel>")
+        except Exception:
+            pass
+
+    def _on_agent_wheel(self, event):
+        try:
+            self._agent_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        except Exception:
+            pass
+
+    def _bind_profile_wheel(self, _=None):
+        self._profile_canvas.bind_all("<MouseWheel>", self._on_profile_wheel)
+
+    def _unbind_profile_wheel(self, _=None):
+        try:
+            self._profile_canvas.unbind_all("<MouseWheel>")
+        except Exception:
+            pass
+
+    def _on_profile_wheel(self, event):
+        try:
+            self._profile_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        except Exception:
+            pass
+
+    def _render_agents(self):
+        for child in list(self._agent_inner.winfo_children()):
+            child.destroy()
+        for item in self.catalog:
+            var = self.agent_vars[item["id"]]
+            row = tk.Frame(self._agent_inner, bg=T.bg_panel)
+            row.pack(fill="x", pady=1)
+            tk.Checkbutton(
+                row, text=item["title"], variable=var, bg=T.bg_panel, fg=T.ink,
+                selectcolor=T.bg_input, activebackground=T.bg_panel,
+                activeforeground=T.cyan, font=T.mono_small, bd=0, anchor="w",
+                highlightthickness=0, command=self._update_counts).pack(
+                side="left", anchor="w")
+            mark = "●" if item["exists"] else "○"
+            color = T.green if item["exists"] else T.cyan_dim
+            tk.Label(row, text=mark, bg=T.bg_panel, fg=color,
+                     font=T.mono_small).pack(side="right", padx=(4, 2))
+            desc = tk.Label(self._agent_inner, text=item["description"], bg=T.bg_panel,
+                            fg=T.ink_dim, font=T.mono_small, anchor="w", justify="left",
+                            wraplength=360)
+            desc.pack(fill="x", padx=(24, 4))
+            path = tk.Label(self._agent_inner, text=str(item["path"]), bg=T.bg_panel,
+                            fg=T.cyan_dim, font=T.mono_small, anchor="w", justify="left",
+                            wraplength=360)
+            path.pack(fill="x", padx=(24, 4), pady=(0, 4))
+        self._update_counts()
+
+    def _render_profiles(self):
+        for child in list(self._profile_inner.winfo_children()):
+            child.destroy()
+        needle = (self.var_profile_filter.get() or "").strip().lower()
+        for profile in self.app.profiles:
+            pid = profile["id"]
+            text = "%s  (%s)" % (profile.get("display_name") or pid, pid)
+            if needle and needle not in text.lower():
+                continue
+            var = self.profile_vars.get(pid)
+            if var is None:
+                var = tk.BooleanVar(master=self, value=True)
+                self.profile_vars[pid] = var
+            cb = tk.Checkbutton(
+                self._profile_inner, text=text, variable=var, bg=T.bg_panel, fg=T.ink,
+                selectcolor=T.bg_input, activebackground=T.bg_panel,
+                activeforeground=T.cyan, font=T.mono_small, bd=0, anchor="w",
+                highlightthickness=0, command=self._update_counts)
+            cb.pack(fill="x", padx=4, pady=1)
+            tk.Label(self._profile_inner, text=str(profile.get("base_url") or ""),
+                     bg=T.bg_panel, fg=T.cyan_dim, font=T.mono_small,
+                     anchor="w").pack(fill="x", padx=(24, 4))
+        self._update_counts()
+
+    def _update_counts(self):
+        try:
+            agents = [a for a in AGENT_IDS if self.agent_vars[a].get()]
+            profiles = [p for p, v in self.profile_vars.items() if v.get()]
+            self.lbl_agents.configure(text="ВЫБРАНО: %d / %d" % (len(agents), len(AGENT_IDS)))
+            self.lbl_profiles.configure(
+                text="ВЫБРАНО: %d / %d" % (len(profiles), len(self.app.profiles)))
+        except Exception:
+            pass
+
+    def _set_agents(self, value):
+        for var in self.agent_vars.values():
+            var.set(value)
+        self._update_counts()
+
+    def _set_profiles(self, value):
+        for var in self.profile_vars.values():
+            var.set(value)
+        self._update_counts()
+
+    # --- импорт -----------------------------------------------------------
+    def _selection(self):
+        agents = [a for a in AGENT_IDS if self.agent_vars[a].get()]
+        ids = [p for p, v in self.profile_vars.items() if v.get()]
+        profiles = [p for p in self.app.profiles if p["id"] in ids]
+        return agents, profiles
+
+    def _import(self, dry_run=False):
+        agents, profiles = self._selection()
+        if not agents:
+            messagebox.showinfo("Перенос", "Отметьте хотя бы одного агента", parent=self)
+            return
+        if not profiles:
+            messagebox.showinfo("Перенос", "Отметьте хотя бы один профиль", parent=self)
+            return
+        save_agents_settings({
+            "agents": agents,
+            "profiles": [p["id"] for p in profiles],
+        })
+        if dry_run:
+            lines = ["Проверка (файлы не изменяются):"]
+            for agent in agents:
+                item = next((c for c in self.catalog if c["id"] == agent), None)
+                where = item["path"] if item else "—"
+                if agent == "vscode":
+                    lines.append("  • %s → расширение %s + %s" % (
+                        item["title"] if item else agent, VSCODE_EXT_ID,
+                        vscode_settings_path(self.home)))
+                else:
+                    lines.append("  • %s → %s" % (agent, where))
+            lines.append("Профилей: %d" % len(profiles))
+            self._report("\n".join(lines))
+            return
+        self.btn_import.configure(state="disabled")
+        try:
+            results = transfer_profiles(
+                profiles, self.app.var_default_model.get(), agents,
+                home=self.home,
+                config_path=self.app.config_path)
+        finally:
+            try:
+                self.btn_import.configure(state="normal")
+            except Exception:
+                pass
+        lines = []
+        for res in results:
+            mark = "OK " if res.get("ok") else "ОШИБКА "
+            where = str(res.get("path") or "—")
+            lines.append("%s%s\n    %s\n    %s" % (
+                mark, res.get("title") or res.get("agent"), where, res.get("message") or ""))
+        ok = sum(1 for r in results if r.get("ok"))
+        header = "ГОТОВО: УСПЕШНО %d ИЗ %d" % (ok, len(results))
+        if ok != len(results):
+            header = "ЗАВЕРШЕНО С ОШИБКАМИ: УСПЕШНО %d ИЗ %d" % (ok, len(results))
+        self._report(header + "\n\n" + "\n\n".join(lines))
+        self._result = results
+        self.app._set_status("ПЕРЕНОС В АГЕНТОВ: УСПЕШНО %d ИЗ %d" % (ok, len(results)))
+
+    def _report(self, text):
+        try:
+            self.txt_report.configure(state="normal")
+            self.txt_report.delete("1.0", "end")
+            self.txt_report.insert("1.0", text)
+            self.txt_report.configure(state="disabled")
+            self.txt_report.see("1.0")
+        except Exception:
+            pass
+
+
 class App:
     def __init__(self):
         self.root_ready = True
@@ -4322,6 +5588,16 @@ class App:
             "Импортировано профилей: %d\nНовых: %d\nЗаменено: %d\n\n"
             "Не забудьте «ПРИМЕНИТЬ К КОНФИГУ»." % (len(imported), added, replaced),
             parent=self.root)
+
+    def open_agents_dialog(self):
+        """Окно переноса профилей в ИИ-агентов."""
+        if not self.profiles:
+            messagebox.showinfo("Перенос в агентов",
+                                "Список профилей пуст — сначала добавьте профиль",
+                                parent=self.root)
+            return
+        dlg = AgentsDialog(self)
+        self.root.wait_window(dlg)
 
     def run(self):
         self.root.mainloop()

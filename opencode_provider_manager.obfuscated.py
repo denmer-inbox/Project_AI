@@ -658,8 +658,681 @@ def _9(data) -> tuple:
     if not result:
         raise ValueError('В файле нет ни одного профиля')
     return (result, default_model)
+AGENT_IDS = ('opencode', 'vscode', 'cline', 'continue', 'codex', 'claude', 'aider')
+AGENTS_FILE_NAME = 'agents.json'
+CONTINUE_ROLES = ['chat', 'edit', 'apply']
+VSCODE_EXT_ID = 'local.opencode-lm'
 
-class _aa(tk.Toplevel):
+def _aa(config: dict, profiles: list) -> dict:
+    new = copy.deepcopy(config)
+    providers = new.get('providers')
+    if not isinstance(providers, dict):
+        providers = {}
+        new['providers'] = providers
+    for profile in profiles:
+        pid = profile.get('id')
+        if not pid:
+            continue
+        existing = providers.get(pid) if isinstance(providers.get(pid), dict) else {}
+        raw = profile.get('_raw')
+        base = copy.deepcopy(existing)
+        if isinstance(raw, dict):
+            for key, value in raw.items():
+                if key == 'models':
+                    continue
+                base[key] = copy.deepcopy(value)
+            raw_models = raw.get('models')
+            if isinstance(raw_models, dict):
+                merged = raw_models if isinstance(base.get('models'), dict) else {}
+                for mid, spec in base.get('models', {}).items():
+                    merged.setdefault(mid, spec)
+                base['models'] = merged
+        settings = {}
+        base_url = _r(profile.get('base_url', ''))
+        if base_url:
+            settings['baseURL'] = base_url
+        if profile.get('api_key'):
+            settings['apiKey'] = profile['api_key']
+        for key, value in (profile.get('extra_settings') or {}).items():
+            settings[key] = value
+        base['name'] = profile.get('display_name') or pid
+        base['package'] = profile.get('package') or PACKAGES[0]
+        if settings:
+            base['settings'] = settings
+        coef = str(profile.get('coefficient') or '').strip()
+        if coef:
+            base['_coefficient'] = coef
+        old_models = base.get('models') if isinstance(base.get('models'), dict) else {}
+        old_models = dict(old_models) if isinstance(old_models, dict) else {}
+        for mid in list(profile.get('models') or []):
+            spec = _1({'id': mid}, old_models.get(mid))
+            spec.pop('disabled', None)
+            old_models[mid] = spec
+        if old_models:
+            base['models'] = old_models
+        providers[pid] = base
+    return new
+
+def _ab() -> Path:
+    base = Path(os.environ.get('LOCALAPPDATA') or Path.home())
+    return base / 'OpenCodeProviderManager' / AGENTS_FILE_NAME
+
+def _ac() -> dict:
+    defaults = {'agents': [], 'profiles': []}
+    try:
+        path = _ab()
+        if path.exists():
+            data = json.loads(path.read_text(encoding='utf-8-sig'))
+            if isinstance(data, dict):
+                for key in defaults:
+                    if key in data:
+                        defaults[key] = data[key]
+    except Exception:
+        pass
+    return defaults
+
+def _ad(settings: dict) -> None:
+    try:
+        path = _ab()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {key: settings.get(key) for key in ('agents', 'profiles')}
+        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding='utf-8')
+    except Exception:
+        pass
+
+def _ae(home=None) -> Path:
+    return Path(home) if home else Path(os.path.expanduser('~'))
+
+def _af(home=None) -> Path:
+    if home:
+        return _ae(home) / 'AppData' / 'Roaming' / 'Code' / 'User'
+    appdata = os.environ.get('APPDATA')
+    base = Path(appdata) if appdata else _ae() / 'AppData' / 'Roaming'
+    return base / 'Code' / 'User'
+
+def _ag(home=None) -> Path:
+    return _af(home) / 'settings.json'
+
+def _ah(home=None) -> Path:
+    return _ae(home) / '.vscode' / 'extensions'
+
+def _ai(home=None) -> Path:
+    return _ae(home) / 'opencode-lm-vscode'
+
+def _aj(home=None) -> Path:
+    return _ae(home) / '.continue' / 'config.yaml'
+
+def _ak(home=None) -> Path:
+    return _ae(home) / '.codex' / 'config.toml'
+
+def _al(home=None) -> Path:
+    return _ae(home) / '.claude' / 'settings.json'
+
+def _am(home=None) -> Path:
+    return _ae(home) / '.aider.conf.yml'
+
+def _an(home=None) -> Path:
+    return _ae(home) / '.cline' / 'data' / 'settings' / 'providers.json'
+
+def _ao(home=None) -> Path:
+    return _an(home).parent / 'models.json'
+
+def _ap(home=None) -> Path:
+    return _ae(home) / '.cline'
+
+def _aq(home=None, config_path=None) -> list:
+    home = _ae(home)
+    config = _a5(config_path, home)
+    items = [{'id': 'opencode', 'title': 'OpenCode (этот конфиг)', 'path': config, 'kind': 'config', 'description': 'Записать профили в opencode.json — тот же файл читают OpenCode и расширения VS Code.'}, {'id': 'vscode', 'title': 'VS Code (чат-модели)', 'path': config, 'kind': 'config', 'description': 'Поставить расширение OpenCode LM и подключить его к этому же конфигу — профили появятся в пикере моделей VS Code.', 'extension': VSCODE_EXT_ID}, {'id': 'cline', 'title': 'Cline (VS Code, ~/.cline)', 'path': _an(home), 'kind': 'config', 'description': 'Прописать профили в providers.json Cline (openai-compatible) и models.json.'}, {'id': 'continue', 'title': 'Continue (.continue/config.yaml)', 'path': _aj(home), 'kind': 'config', 'description': 'Дописать модели как openai-совместимые провайдеры Continue.'}, {'id': 'codex', 'title': 'Codex CLI (~/.codex/config.toml)', 'path': _ak(home), 'kind': 'config', 'description': 'Добавить блоки [model_providers.*] и bearer-токены.'}, {'id': 'claude', 'title': 'Claude Code (~/.claude/settings.json)', 'path': _al(home), 'kind': 'config', 'description': 'Прописать ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_MODEL.'}, {'id': 'aider', 'title': 'Aider (~/.aider.conf.yml)', 'path': _am(home), 'kind': 'config', 'description': 'openai-api-base, openai-api-key и модель по умолчанию.'}]
+    catalog = []
+    for item in items:
+        entry = dict(item)
+        if entry['id'] == 'vscode':
+            entry['exists'] = _a8(home)
+        else:
+            entry['exists'] = Path(entry['path']).exists()
+        catalog.append(entry)
+    return catalog
+
+def _ar(path: Path):
+    try:
+        if not path.exists():
+            return None
+        stamp = datetime.now().strftime('%Y%m%d-%H%M%S-%f')[:-3]
+        dest = path.with_name('%s.bak-%s' % (path.name, stamp))
+        shutil.copy2(path, dest)
+        return dest
+    except Exception:
+        return None
+
+def _as(path: Path, text: str):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + '.tmp')
+    tmp.write_text(text, encoding='utf-8', newline='\n')
+    os.replace(tmp, path)
+
+def _at(path: Path) -> str:
+    try:
+        return path.read_text(encoding='utf-8-sig')
+    except FileNotFoundError:
+        return ''
+
+def _au() -> bool:
+    try:
+        import yaml
+        return True
+    except Exception:
+        return False
+
+def _av(text: str) -> dict:
+    if not text.strip():
+        return {}
+    try:
+        import yaml
+    except Exception:
+        return {}
+    try:
+        data = yaml.safe_load(text)
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+def _aw(data: dict) -> str:
+    try:
+        import yaml
+        return yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=False)
+    except Exception:
+        return _ax(data)
+
+def _ax(data: dict) -> str:
+    lines = []
+    for key, value in data.items():
+        if isinstance(value, list):
+            if not value:
+                lines.append('%s: []' % key)
+                continue
+            lines.append('%s:' % key)
+            for item in value:
+                if not isinstance(item, dict):
+                    lines.append('  - %s' % json.dumps(item, ensure_ascii=False))
+                    continue
+                first = True
+                for sub_key, sub_value in item.items():
+                    prefix = '  - ' if first else '    '
+                    first = False
+                    if isinstance(sub_value, list):
+                        lines.append('%s%s:' % (prefix, sub_key))
+                        for sub_item in sub_value:
+                            lines.append('      - %s' % sub_item)
+                    else:
+                        lines.append('%s%s: %s' % (prefix, sub_key, json.dumps(sub_value, ensure_ascii=False)))
+            continue
+        lines.append('%s: %s' % (key, json.dumps(value, ensure_ascii=False)))
+    return '\n'.join(lines) + '\n'
+
+def _ay(text: str, path: Path) -> dict:
+    if not text.strip():
+        return {}
+    if not _au():
+        raise RuntimeError('нужен PyYAML, чтобы не затереть %s — установите: pip install pyyaml' % path)
+    data = _av(text)
+    if not data:
+        raise RuntimeError('%s не разбирается как YAML — файл не тронут' % path)
+    return data
+
+def _az(profiles, ids=None) -> list:
+    if not ids:
+        return [p for p in profiles if p.get('base_url')]
+    wanted = set(ids)
+    return [p for p in profiles if p.get('id') in wanted and p.get('base_url')]
+
+def _a0(profiles, default_model=''):
+    if not profiles:
+        return None
+    pid = _0(default_model)[0]
+    if pid:
+        for profile in profiles:
+            if profile.get('id') == pid:
+                return profile
+    for profile in profiles:
+        if profile.get('models'):
+            return profile
+    return profiles[0]
+
+def _a1(profile, default_model='') -> str:
+    models = list((profile or {}).get('models') or [])
+    pid, mid = _0(default_model)
+    if profile and pid == profile.get('id') and (mid in models):
+        return mid
+    return models[0] if models else ''
+
+def _a2(package: str, base_url: str='') -> str:
+    package = (package or '').lower()
+    if 'anthropic' in package:
+        return 'anthropic'
+    if 'google' in package or 'gemini' in package:
+        return 'gemini'
+    if 'openai' in package:
+        return 'openai'
+    return 'openai'
+
+def _a3(pid: str) -> str:
+    safe = re.sub('[^A-Za-z0-9]+', '_', str(pid)).strip('_').upper() or 'PROVIDER'
+    return 'OPENCODE_%s_API_KEY' % safe
+
+def _a4(value) -> str:
+    return json.dumps(str(value), ensure_ascii=False)
+
+def _a5(config_path, home=None) -> Path:
+    if config_path:
+        return Path(config_path)
+    if home is not None:
+        return _ae(home) / '.config' / 'opencode' / 'opencode.json'
+    return _i()
+
+def _a6(profiles, default_model, config_path=None, home=None):
+    path = Path(config_path) if config_path else _a5(None, home)
+    config = _k(path)
+    new_config = _aa(config, profiles)
+    ref = (default_model or '').strip()
+    if ref and ref != '(не задана)':
+        new_config['model'] = ref
+    backup = _p(path, new_config)
+    return {'agent': 'opencode', 'title': 'OpenCode (этот конфиг)', 'ok': True, 'path': path, 'backup': backup, 'message': 'Записано профилей: %d (остальные не тронуты)' % len(profiles)}
+
+def _a7(home=None):
+    base = _ah(home)
+    try:
+        dirs = sorted((p for p in base.glob(VSCODE_EXT_ID + '-*') if p.is_dir()))
+    except Exception:
+        return None
+    return dirs[-1] if dirs else None
+
+def _a8(home=None) -> bool:
+    return _a7(home) is not None
+
+def _a9(home=None):
+    src = _ai(home)
+    for pattern in ('*.vsix', 'extension/*.vsix'):
+        try:
+            found = sorted(src.glob(pattern))
+        except Exception:
+            found = []
+        if found:
+            return found[-1]
+    return None
+
+def _ba(home=None):
+    roots = []
+    local = os.environ.get('LOCALAPPDATA')
+    if local and (not home):
+        roots.append(Path(local) / 'Programs' / 'Microsoft VS Code')
+    pf = os.environ.get('ProgramFiles')
+    if pf and (not home):
+        roots.append(Path(pf) / 'Microsoft VS Code')
+    pfx86 = os.environ.get('ProgramFiles(x86)')
+    if pfx86 and (not home):
+        roots.append(Path(pfx86) / 'Microsoft VS Code')
+    candidates = []
+    for root in roots:
+        try:
+            if not root.is_dir():
+                continue
+            for sub in root.iterdir():
+                cli = sub / 'resources' / 'app' / 'out' / 'cli.js'
+                if cli.is_file():
+                    candidates.append(('node', cli))
+        except Exception:
+            continue
+        cmd = root / 'bin' / 'code.cmd'
+        if cmd.is_file():
+            candidates.append(('cmd', cmd))
+    return candidates
+
+def _bb(kind, cli_path, vsix, extensions_dir):
+    import subprocess
+    if kind == 'node':
+        cmd = ['node', str(cli_path)]
+    else:
+        cmd = ['cmd', '/c', str(cli_path)]
+    cmd += ['--extensions-dir', str(extensions_dir), '--install-extension', str(vsix), '--force']
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180, encoding='utf-8', errors='replace')
+    except Exception as exc:
+        return (False, str(exc))
+    out = ((proc.stdout or '') + (proc.stderr or '')).strip()
+    ok = proc.returncode == 0 and re.search('successfully installed|already installed', out, re.I)
+    return (bool(ok), out)
+
+def _bc(ext_dir: Path, extensions_json: Path, version: str):
+    entries = []
+    if extensions_json.exists() and extensions_json.stat().st_size > 0:
+        try:
+            data = json.loads(extensions_json.read_text(encoding='utf-8-sig'))
+            if isinstance(data, list):
+                entries = [e for e in data if not (isinstance(e, dict) and (e.get('identifier') or {}).get('id') == VSCODE_EXT_ID)]
+        except Exception:
+            backup = extensions_json.with_name(extensions_json.name + '.broken-' + datetime.now().strftime('%Y%m%d%H%M%S'))
+            try:
+                shutil.copy2(extensions_json, backup)
+            except Exception:
+                pass
+    uri = '/' + str(ext_dir.resolve()).replace('\\', '/').lstrip('/')
+    entries.append({'identifier': {'id': VSCODE_EXT_ID, 'uuid': '8f3c1c2e-4a55-4c07-9d3b-3f0a6d5e7b21'}, 'version': version, 'location': {'$mid': 1, 'path': uri, 'scheme': 'file'}, 'relativeLocation': ext_dir.name, 'metadata': {'source': 'vsix', 'installedTimestamp': int(datetime.now().timestamp() * 1000), 'pinned': False, 'updated': True, 'private': True, 'isPreReleaseVersion': False, 'preRelease': False}})
+    extensions_json.parent.mkdir(parents=True, exist_ok=True)
+    _as(extensions_json, json.dumps(entries, ensure_ascii=False, separators=(',', ':')))
+
+def _bd(vsix: Path, home=None):
+    import zipfile
+    extensions_dir = _ah(home)
+    extensions_dir.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(vsix) as zf:
+        names = zf.namelist()
+        try:
+            manifest = zf.read('extension/package.json').decode('utf-8-sig')
+            version = str(json.loads(manifest).get('version') or '1.0.0')
+        except Exception:
+            version = '1.0.0'
+        target = extensions_dir / ('%s-%s' % (VSCODE_EXT_ID, version))
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
+        for name in names:
+            if not name.startswith('extension/') or name.endswith('/'):
+                continue
+            rel = name[len('extension/'):]
+            dest = target / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(name) as src, open(dest, 'wb') as out:
+                shutil.copyfileobj(src, out)
+        if 'extension.vsixmanifest' in names:
+            (target / '.vsixmanifest').write_bytes(zf.read('extension.vsixmanifest'))
+    _bc(target, extensions_dir / 'extensions.json', version)
+    return target
+
+def _be(home=None) -> str:
+    if _a8(home):
+        found = _a7(home)
+        return 'Расширение уже установлено: %s' % found.name
+    vsix = _a9(home)
+    if vsix is None:
+        return 'Расширение не установлено и .vsix не найден — положите opencode-lm-*.vsix в %s' % _ai(home)
+    extensions_dir = _ah(home)
+    for kind, cli in _ba(home):
+        ok, out = _bb(kind, cli, vsix, extensions_dir)
+        if ok and _a8(home):
+            return 'Расширение установлено через CLI: %s' % vsix.name
+    try:
+        target = _bd(vsix, home)
+    except Exception as exc:
+        return 'Не удалось установить расширение: %s' % exc
+    return 'Расширение установлено: %s' % target.name
+
+def _bf(settings_path: Path, config_path) -> str:
+    text = _at(settings_path)
+    if not text.strip():
+        data = {'opencodeLM.configPath': str(config_path)}
+        _as(settings_path, json.dumps(data, indent=2, ensure_ascii=False) + '\n')
+        return 'settings.json создан'
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        try:
+            data = json.loads(_j(text))
+        except Exception:
+            return 'settings.json не разбирается — пропущен (задайте путь вручную)'
+        if not isinstance(data, dict):
+            return 'settings.json не является объектом — пропущен'
+        if data.get('opencodeLM.configPath') == str(config_path):
+            return 'opencodeLM.configPath уже указывает на конфиг'
+        insert_at = text.find('{')
+        if insert_at < 0:
+            return 'settings.json без открывающей скобки — пропущен'
+        line = '\n    "opencodeLM.configPath": %s,' % json.dumps(str(config_path), ensure_ascii=False)
+        patched = text[:insert_at + 1] + line + text[insert_at + 1:]
+        _ar(settings_path)
+        _as(settings_path, patched)
+        return 'opencodeLM.configPath = %s (комментарии сохранены)' % config_path
+    if not isinstance(data, dict):
+        return 'settings.json не является объектом — пропущен'
+    if config_path and data.get('opencodeLM.configPath') != str(config_path):
+        data['opencodeLM.configPath'] = str(config_path)
+        _ar(settings_path)
+        _as(settings_path, json.dumps(data, indent=2, ensure_ascii=False) + '\n')
+        return 'opencodeLM.configPath = %s' % config_path
+    return 'opencodeLM.configPath уже указывает на конфиг'
+
+def _bg(profiles, default_model, config_path=None, home=None):
+    config = _a5(config_path, home)
+    notes = [_be(home)]
+    try:
+        notes.append(_bf(_ag(home), config))
+    except Exception as exc:
+        notes.append('settings.json не изменён: %s' % exc)
+    notes.append('Профили берутся из %s' % config)
+    return {'agent': 'vscode', 'title': 'VS Code (чат-модели)', 'ok': True, 'path': config, 'backup': None, 'message': '; '.join(notes)}
+
+def _bh(profiles, default_model, home=None):
+    path = _an(home)
+    text = _at(path)
+    try:
+        data = json.loads(text) if text.strip() else {}
+    except json.JSONDecodeError:
+        try:
+            data = json.loads(_j(text))
+        except Exception as exc:
+            raise RuntimeError('providers.json не разбирается: %s' % exc)
+    if not isinstance(data, dict):
+        raise RuntimeError('providers.json не является объектом JSON')
+    data.setdefault('version', 1)
+    providers = data.get('providers')
+    if not isinstance(providers, dict):
+        providers = {}
+    now = datetime.now().astimezone().isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+    for profile in profiles:
+        pid = str(profile.get('id') or '')
+        settings = {'provider': 'openai-compatible', 'apiKey': profile.get('api_key') or '', 'model': _a1(profile, default_model), 'baseUrl': profile.get('base_url'), 'headers': {}, 'reasoning': {'enabled': False}}
+        previous = providers.get(pid) if isinstance(providers.get(pid), dict) else {}
+        entry = dict(previous)
+        entry['settings'] = settings
+        entry['updatedAt'] = now
+        entry['tokenSource'] = 'manual'
+        providers[pid] = entry
+    data['providers'] = providers
+    primary = _a0(profiles, default_model)
+    if primary is not None:
+        data['lastUsedProvider'] = str(primary.get('id'))
+    data.setdefault('modes', {})
+    _ar(path)
+    _as(path, json.dumps(data, indent=2, ensure_ascii=False) + '\n')
+    models_path = _ao(home)
+    try:
+        models_doc = json.loads(_at(models_path) or '{}')
+    except Exception:
+        models_doc = {}
+    if not isinstance(models_doc, dict):
+        models_doc = {}
+    models_doc.setdefault('version', 1)
+    per_provider = models_doc.get('providers')
+    if not isinstance(per_provider, dict):
+        per_provider = {}
+    for profile in profiles:
+        pid = str(profile.get('id') or '')
+        entry = per_provider.get(pid) if isinstance(per_provider.get(pid), dict) else {}
+        known = entry.get('models') if isinstance(entry.get('models'), dict) else {}
+        for mid in profile.get('models') or []:
+            spec = known.get(mid) if isinstance(known.get(mid), dict) else {}
+            spec['supportsVision'] = False
+            known[mid] = spec
+        entry['models'] = known
+        per_provider[pid] = entry
+    models_doc['providers'] = per_provider
+    _ar(models_path)
+    _as(models_path, json.dumps(models_doc, indent=2, ensure_ascii=False) + '\n')
+    count = sum((len(p.get('models') or []) for p in profiles))
+    return {'agent': 'cline', 'title': 'Cline', 'ok': True, 'path': path, 'backup': None, 'message': 'Провайдеров: %d, моделей: %d' % (len(profiles), count)}
+
+def _bi(profiles, default_model, home=None):
+    path = _aj(home)
+    doc = _ay(_at(path), path)
+    if not doc:
+        doc = {'name': 'Local Config', 'version': '1.0.0', 'schema': 'v1'}
+    old = doc.get('models')
+    models = list(old) if isinstance(old, list) else []
+    ours_bases = {p.get('base_url') for p in profiles if p.get('base_url')}
+
+    def is_ours(entry):
+        return isinstance(entry, dict) and entry.get('apiBase') in ours_bases
+    kept = [m for m in models if not is_ours(m)]
+    added = 0
+    for profile in profiles:
+        kind = _a2(profile.get('package'), profile.get('base_url'))
+        for mid in profile.get('models') or []:
+            kept.append({'name': '%s · %s' % (profile.get('display_name') or profile.get('id'), mid), 'provider': kind, 'model': mid, 'apiBase': profile.get('base_url'), 'apiKey': profile.get('api_key') or '', 'roles': list(CONTINUE_ROLES)})
+            added += 1
+    doc['models'] = kept
+    _ar(path)
+    _as(path, _aw(doc))
+    return {'agent': 'continue', 'title': 'Continue', 'ok': True, 'path': path, 'backup': None, 'message': 'Моделей добавлено: %d, всего: %d' % (added, len(kept))}
+
+def _bj(text: str) -> tuple:
+    lines = text.splitlines()
+    split = len(lines)
+    for idx, line in enumerate(lines):
+        if line.lstrip().startswith('['):
+            split = idx
+            break
+    return (lines[:split], lines[split:])
+
+def _bk(text: str, values: dict) -> str:
+    head, body = _bj(text)
+    keep = []
+    for line in head:
+        stripped = line.strip()
+        if any((stripped.startswith('%s =' % key) or stripped.startswith('%s=' % key) for key in values)):
+            continue
+        keep.append(line)
+    while keep and (not keep[0].strip()):
+        keep.pop(0)
+    prefix = ['%s = %s' % (key, _a4(value)) for key, value in values.items()]
+    result = prefix + keep
+    if body:
+        result = result + [''] + body
+    return '\n'.join(result).strip('\n') + '\n'
+
+def _bl(text: str, headers) -> str:
+    lines = text.splitlines()
+    out = []
+    skipping = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith('[') and (not stripped.startswith('[[')):
+            skipping = stripped in headers
+            if skipping:
+                continue
+        elif stripped.startswith('[['):
+            skipping = False
+        if skipping:
+            continue
+        out.append(line)
+    while out and (not out[-1].strip()):
+        out.pop()
+    return '\n'.join(out)
+
+def _bm(profiles, default_model, home=None):
+    path = _ak(home)
+    text = _at(path)
+    headers = {'[model_providers.%s]' % p.get('id') for p in profiles}
+    body = _bl(text, headers)
+    blocks = []
+    for profile in profiles:
+        pid = str(profile.get('id') or '')
+        blocks.append('[model_providers.%s]' % pid)
+        blocks.append('name = %s' % _a4(profile.get('display_name') or pid))
+        blocks.append('base_url = %s' % _a4(profile.get('base_url')))
+        blocks.append('wire_api = "chat"')
+        blocks.append('env_key = %s' % _a4(_a3(pid)))
+        if profile.get('api_key'):
+            blocks.append('experimental_bearer_token = %s' % _a4(profile['api_key']))
+        blocks.append('')
+    merged = (body.rstrip() + '\n\n' + '\n'.join(blocks)).strip('\n') + '\n'
+    primary = _a0(profiles, default_model)
+    if primary is not None:
+        model = _a1(primary, default_model)
+        values = {'model_provider': primary.get('id')}
+        if model:
+            values['model'] = model
+        merged = _bk(merged, values)
+    _ar(path)
+    _as(path, merged)
+    return {'agent': 'codex', 'title': 'Codex CLI', 'ok': True, 'path': path, 'backup': None, 'message': 'Провайдеров записано: %d' % len(profiles)}
+
+def _bn(profiles, default_model, home=None):
+    path = _al(home)
+    text = _at(path)
+    try:
+        data = json.loads(text) if text.strip() else {}
+    except json.JSONDecodeError:
+        try:
+            data = json.loads(_j(text))
+        except Exception as exc:
+            raise RuntimeError('settings.json не разбирается: %s' % exc)
+    if not isinstance(data, dict):
+        raise RuntimeError('settings.json не является объектом JSON')
+    primary = _a0(profiles, default_model)
+    if primary is None:
+        raise RuntimeError('нет профилей с baseURL')
+    env = data.get('env') if isinstance(data.get('env'), dict) else {}
+    env['ANTHROPIC_BASE_URL'] = primary.get('base_url')
+    if primary.get('api_key'):
+        env['ANTHROPIC_AUTH_TOKEN'] = primary['api_key']
+        env['ANTHROPIC_API_KEY'] = primary['api_key']
+    model = _a1(primary, default_model)
+    if model:
+        env['ANTHROPIC_MODEL'] = model
+    data['env'] = env
+    _ar(path)
+    _as(path, json.dumps(data, indent=2, ensure_ascii=False) + '\n')
+    return {'agent': 'claude', 'title': 'Claude Code', 'ok': True, 'path': path, 'backup': None, 'message': '%s → %s' % (primary.get('id'), model or '(модель не задана)')}
+
+def _bo(profiles, default_model, home=None):
+    path = _am(home)
+    doc = _ay(_at(path), path)
+    primary = _a0(profiles, default_model)
+    if primary is None:
+        raise RuntimeError('нет профилей с baseURL')
+    model = _a1(primary, default_model)
+    doc['openai-api-base'] = primary.get('base_url')
+    if primary.get('api_key'):
+        doc['openai-api-key'] = primary['api_key']
+    if model:
+        doc['model'] = 'openai/%s' % model
+    _ar(path)
+    _as(path, _aw(doc))
+    return {'agent': 'aider', 'title': 'Aider', 'ok': True, 'path': path, 'backup': None, 'message': '%s → %s' % (primary.get('id'), model or '(модель не задана)')}
+TRANSFER_WRITERS = {'opencode': _a6, 'vscode': _bg, 'cline': _bh, 'continue': _bi, 'codex': _bm, 'claude': _bn, 'aider': _bo}
+
+def _bp(profiles, default_model='', agent_ids=None, home=None, config_path=None):
+    selected = [a for a in agent_ids or [] if a in TRANSFER_WRITERS]
+    selected.sort(key=lambda a: AGENT_IDS.index(a) if a in AGENT_IDS else 99)
+    targets = _az(profiles)
+    results = []
+    if not targets:
+        return [{'agent': '—', 'title': '—', 'ok': False, 'path': None, 'message': 'нет профилей с baseURL'}]
+    for agent in selected:
+        writer = TRANSFER_WRITERS[agent]
+        try:
+            if agent == 'opencode':
+                result = writer(targets, default_model, config_path=config_path, home=home)
+            elif agent == 'vscode':
+                result = writer(targets, default_model, config_path=config_path, home=home)
+            else:
+                result = writer(targets, default_model, home=home)
+        except Exception as exc:
+            result = {'agent': agent, 'title': agent, 'ok': False, 'path': None, 'backup': None, 'message': str(exc)}
+        results.append(result)
+    return results
+
+class _bq(tk.Toplevel):
 
     def __init__(self, app, profile):
         super().__init__(app.root)
@@ -877,7 +1550,7 @@ class _aa(tk.Toplevel):
             text = self._display_for(mid)
             if text != mid:
                 text = '%s   (%s)' % (text, mid)
-            cb = _ad(self.inner, self, self.model_vars[mid], text)
+            cb = _bt(self.inner, self, self.model_vars[mid], text)
             cb.var = self.model_vars[mid]
             cb.pack(anchor='w', padx=8, pady=1, fill='x')
         if shown == 0:
@@ -1012,7 +1685,7 @@ class _aa(tk.Toplevel):
         self.result = None
         self.destroy()
 
-class _ab(tk.Toplevel):
+class _br(tk.Toplevel):
 
     def __init__(self, app):
         super().__init__(app.root)
@@ -1115,10 +1788,10 @@ class _ab(tk.Toplevel):
         self.app.quick_restore(entry)
         self.reload()
 
-class _ac:
+class _bs:
     pass
 
-class _ad(tk.Checkbutton):
+class _bt(tk.Checkbutton):
 
     def __init__(self, master, owner, variable, text, **kw):
         kw.setdefault('bg', _b.bg_panel)
@@ -1168,39 +1841,39 @@ CONTROL_KEYCODES = {'paste': (VK_V,), 'copy': (VK_C, VK_INSERT), 'cut': (VK_X,),
 LATIN_SHORTCUT_KEYSYMS = {'paste': ('v', 'V'), 'copy': ('c', 'C'), 'cut': ('x', 'X'), 'select_all': ('a', 'A')}
 INPUT_CLASSES = ('TEntry', 'TCombobox', 'TSpinbox', 'Entry', 'Spinbox', 'Text')
 
-def _ae(widget):
+def _bu(widget):
     try:
         return widget.winfo_class() in INPUT_CLASSES
     except Exception:
         return False
 
-def _af(event, name):
+def _bv(event, name):
     try:
         return int(getattr(event, name, 0) or 0)
     except Exception:
         return 0
 
-def _ag(event):
-    return _af(event, 'state')
+def _bw(event):
+    return _bv(event, 'state')
 
-def _ah(event):
-    return _af(event, 'keycode')
+def _bx(event):
+    return _bv(event, 'keycode')
 
-def _ai(event):
+def _by(event):
     return str(getattr(event, 'keysym', '') or '')
 
-def _aj(event):
+def _bz(event):
     if event is None:
         return None
-    if not _ag(event) & CONTROL_STATE:
+    if not _bw(event) & CONTROL_STATE:
         return None
-    keycode = _ah(event)
+    keycode = _bx(event)
     for action, codes in CONTROL_KEYCODES.items():
         if keycode in codes:
             return action
     return None
 
-class _ak:
+class _b0:
 
     def __init__(self, root):
         self.root = root
@@ -1215,7 +1888,7 @@ class _ak:
 
     def _widget(self, event):
         w = event.widget
-        return w if _ae(w) else None
+        return w if _bu(w) else None
 
     def bind(self, widget):
         widget.bind('<Button-3>', self.popup, add='+')
@@ -1223,20 +1896,20 @@ class _ak:
 
     def bind_tree(self, widget):
         self.bind(widget)
-        if _ae(widget):
+        if _bu(widget):
             widget.bind('<Control-KeyPress>', self.on_control_key, add='+')
         for child in widget.winfo_children():
             self.bind_tree(child)
 
     def _target_for(self, event=None):
         widget = getattr(event, 'widget', None) if event is not None else None
-        if _ae(widget):
+        if _bu(widget):
             return widget
         try:
             widget = self.root.focus_get()
         except Exception:
             widget = None
-        return widget if _ae(widget) else None
+        return widget if _bu(widget) else None
 
     def _run_shortcut(self, widget, action):
         virtual = SHORTCUT_EVENTS[action]
@@ -1249,10 +1922,10 @@ class _ak:
         return 'break'
 
     def on_control_key(self, event):
-        action = _aj(event)
+        action = _bz(event)
         if action is None:
             return None
-        if _ai(event) in LATIN_SHORTCUT_KEYSYMS[action]:
+        if _by(event) in LATIN_SHORTCUT_KEYSYMS[action]:
             return None
         return self._run_shortcut(self._target_for(event), action)
 
@@ -1345,8 +2018,8 @@ class _ak:
             self.menu.grab_release()
         return 'break'
 
-def _al(root):
-    menu = _ak(root)
+def _b1(root):
+    menu = _b0(root)
     for klass in INPUT_CLASSES:
         try:
             root.bind_class(klass, '<Control-KeyPress>', menu.on_control_key, add='+')
@@ -1354,7 +2027,7 @@ def _al(root):
             pass
     return menu
 
-class _am:
+class _b2:
     WM_APP = 32768
     WM_TRAYICON = WM_APP + 20
     WM_LBUTTONUP = 514
@@ -1547,7 +2220,7 @@ class _am:
         menu.add_separator()
         menu.add_command(label='НАСТРОЙКИ AOS…', command=self.app.open_aos_settings)
         menu.add_separator()
-        auto = _a6()
+        auto = _cn()
         menu.add_command(label=('✓ ' if auto else '   ') + 'АВТОЗАГРУЗКА В ТРЕЕ', command=self._toggle_autostart)
         menu.add_separator()
         menu.add_command(label='ЗАКРЫТЬ ПРИЛОЖЕНИЕ', command=self.app.quit_app)
@@ -1559,8 +2232,8 @@ class _am:
         self._menu = menu
 
     def _toggle_autostart(self):
-        target = not _a6()
-        ok = _a7(target)
+        target = not _cn()
+        ok = _co(target)
         if not ok:
             try:
                 messagebox.showerror('Автозагрузка', 'Не удалось изменить параметр автозагрузки.', parent=self.app.root)
@@ -1580,10 +2253,10 @@ class _am:
         if aos.win is not None and aos.win.winfo_exists():
             aos.hide()
             aos.settings['enabled'] = False
-            _az(aos.settings)
+            _cf(aos.settings)
         else:
             aos.settings['enabled'] = True
-            _az(aos.settings)
+            _cf(aos.settings)
             aos.show()
         self.app._refresh_aos_button()
 
@@ -1623,7 +2296,7 @@ class _am:
             pass
         self._added = False
 
-def _au():
+def _ca():
     candidates = []
     try:
         if getattr(sys, 'frozen', False):
@@ -1650,7 +2323,7 @@ WS_EX_TRANSPARENT = 32
 WS_EX_TOOLWINDOW = 128
 WS_EX_NOACTIVATE = 134217728
 
-def _av(hwnd, enabled: bool) -> bool:
+def _cb(hwnd, enabled: bool) -> bool:
     try:
         import ctypes
         from ctypes import wintypes
@@ -1709,7 +2382,7 @@ def _av(hwnd, enabled: bool) -> bool:
     except Exception:
         return False
 
-def _aw(tk_window):
+def _cc(tk_window):
     try:
         import ctypes
         tk_window.update_idletasks()
@@ -1722,12 +2395,12 @@ def _aw(tk_window):
 AOS_POSITIONS = [('top-left', 'СВЕРХУ СЛЕВА'), ('top-center', 'СВЕРХУ ЦЕНТР'), ('top-right', 'СВЕРХУ СПРАВА'), ('mid-left', 'СЛЕВА ЦЕНТР'), ('mid-right', 'СПРАВА ЦЕНТР'), ('bottom-left', 'СНИЗУ СЛЕВА'), ('bottom-center', 'СНИЗУ ЦЕНТР'), ('bottom-right', 'СНИЗУ СПРАВА')]
 AOS_PRESETS = {'compact': 'КОМПАКТНЫЙ', 'normal': 'ОБЫЧНЫЙ', 'wide': 'ШИРОКИЙ'}
 
-def _ax() -> Path:
+def _cd() -> Path:
     base = Path(os.environ.get('LOCALAPPDATA') or Path.home())
     return base / 'OpenCodeProviderManager' / 'aos.json'
 
-def _ay() -> dict:
-    path = _ax()
+def _ce() -> dict:
+    path = _cd()
     defaults = {'enabled': False, 'position': 'top-right', 'preset': 'normal', 'opacity': 0.92, 'offset_x': 18, 'offset_y': 18, 'refresh_sec': 60, 'show_profile': True, 'show_coefficient': True, 'click_through': True, 'always_visible': False, 'profiles': []}
     try:
         if path.exists():
@@ -1738,19 +2411,19 @@ def _ay() -> dict:
         pass
     return defaults
 
-def _az(settings: dict) -> None:
-    path = _ax()
+def _cf(settings: dict) -> None:
+    path = _cd()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(settings, indent=2, ensure_ascii=False), encoding='utf-8')
     except Exception:
         pass
 
-class _at:
+class _b9:
 
     def __init__(self, app):
         self.app = app
-        self.settings = _ay()
+        self.settings = _ce()
         self.win = None
         self._after_id = None
         self._drag = {'x': 0, 'y': 0}
@@ -1764,7 +2437,7 @@ class _at:
         if enabled is None:
             enabled = not self.enabled
         self.settings['enabled'] = bool(enabled)
-        _az(self.settings)
+        _cf(self.settings)
         if enabled:
             self.show()
         else:
@@ -1919,20 +2592,20 @@ class _at:
     def apply_click_through(self, enabled=None):
         if enabled is not None:
             self.settings['click_through'] = bool(enabled)
-            _az(self.settings)
+            _cf(self.settings)
         if self.win is None or not self.win.winfo_exists():
             return False
-        hwnd = _aw(self.win)
+        hwnd = _cc(self.win)
         if not hwnd:
             return False
-        ok = _av(hwnd, self.click_through)
+        ok = _cb(hwnd, self.click_through)
         try:
             import ctypes
             from ctypes import wintypes
             user32 = ctypes.windll.user32
             parent = int(user32.GetParent(wintypes.HWND(hwnd)) or 0)
             if parent:
-                _av(parent, self.click_through)
+                _cb(parent, self.click_through)
         except Exception:
             pass
         try:
@@ -2038,18 +2711,18 @@ class _at:
             self.settings['manual_x'] = self.win.winfo_x()
             self.settings['manual_y'] = self.win.winfo_y()
             self.settings['position'] = 'manual'
-            _az(self.settings)
+            _cf(self.settings)
         except Exception:
             pass
 
     def set_position(self, key):
         self.settings['position'] = key
-        _az(self.settings)
+        _cf(self.settings)
         self.apply_position()
 
     def set_preset(self, key):
         self.settings['preset'] = key
-        _az(self.settings)
+        _cf(self.settings)
         if self.win is not None and self.win.winfo_exists():
             self._build_content(self.win)
             self.apply_position()
@@ -2176,7 +2849,7 @@ class _at:
 
     def set_profiles(self, ids):
         self.settings['profiles'] = list(ids)
-        _az(self.settings)
+        _cf(self.settings)
         if self.win is not None and self.win.winfo_exists():
             self._build_content(self.win)
             self.apply_position()
@@ -2207,9 +2880,9 @@ class _at:
         want_through = self.click_through and (not alt_down)
         if want_through != getattr(self, '_through_active', None):
             self._through_active = want_through
-            hwnd = _aw(self.win)
+            hwnd = _cc(self.win)
             if hwnd:
-                _av(hwnd, want_through)
+                _cb(hwnd, want_through)
         try:
             self._alt_after = self.win.after(150, self._poll_alt)
         except Exception:
@@ -2239,7 +2912,7 @@ class _at:
         self._after_id = None
         self._schedule_refresh(immediate=True)
 
-def _au():
+def _ca():
     candidates = []
     try:
         if getattr(sys, 'frozen', False):
@@ -2266,7 +2939,7 @@ WS_EX_TRANSPARENT = 32
 WS_EX_TOOLWINDOW = 128
 WS_EX_NOACTIVATE = 134217728
 
-def _av(hwnd, enabled: bool) -> bool:
+def _cb(hwnd, enabled: bool) -> bool:
     try:
         import ctypes
         from ctypes import wintypes
@@ -2325,7 +2998,7 @@ def _av(hwnd, enabled: bool) -> bool:
     except Exception:
         return False
 
-def _aw(tk_window):
+def _cc(tk_window):
     try:
         import ctypes
         tk_window.update_idletasks()
@@ -2338,12 +3011,12 @@ def _aw(tk_window):
 AOS_POSITIONS = [('top-left', 'СВЕРХУ СЛЕВА'), ('top-center', 'СВЕРХУ ЦЕНТР'), ('top-right', 'СВЕРХУ СПРАВА'), ('mid-left', 'СЛЕВА ЦЕНТР'), ('mid-right', 'СПРАВА ЦЕНТР'), ('bottom-left', 'СНИЗУ СЛЕВА'), ('bottom-center', 'СНИЗУ ЦЕНТР'), ('bottom-right', 'СНИЗУ СПРАВА')]
 AOS_PRESETS = {'compact': 'КОМПАКТНЫЙ', 'normal': 'ОБЫЧНЫЙ', 'wide': 'ШИРОКИЙ'}
 
-def _ax() -> Path:
+def _cd() -> Path:
     base = Path(os.environ.get('LOCALAPPDATA') or Path.home())
     return base / 'OpenCodeProviderManager' / 'aos.json'
 
-def _ay() -> dict:
-    path = _ax()
+def _ce() -> dict:
+    path = _cd()
     defaults = {'enabled': False, 'position': 'top-right', 'preset': 'normal', 'opacity': 0.92, 'offset_x': 18, 'offset_y': 18, 'refresh_sec': 60, 'show_profile': True, 'show_coefficient': True, 'click_through': True, 'always_visible': False, 'profiles': []}
     try:
         if path.exists():
@@ -2354,15 +3027,15 @@ def _ay() -> dict:
         pass
     return defaults
 
-def _az(settings: dict) -> None:
-    path = _ax()
+def _cf(settings: dict) -> None:
+    path = _cd()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(settings, indent=2, ensure_ascii=False), encoding='utf-8')
     except Exception:
         pass
 
-class _a0(tk.Toplevel):
+class _cg(tk.Toplevel):
 
     def __init__(self, app, aos):
         super().__init__(app.root)
@@ -2538,7 +3211,7 @@ class _a0(tk.Toplevel):
         s['click_through'] = bool(self.var_click.get())
         selected = self._read_profiles_selection()
         s['profiles'] = selected
-        _az(s)
+        _cf(s)
         if self.aos.win is None or not self.aos.win.winfo_exists():
             return
         self.aos.set_opacity(s['opacity'])
@@ -2568,6 +3241,257 @@ class _a0(tk.Toplevel):
         self.app._refresh_aos_button()
         self.destroy()
 
+class _ch(tk.Toplevel):
+
+    def __init__(self, app, home=None):
+        super().__init__(app.root)
+        self.app = app
+        self.title('ПЕРЕНОС ПРОФИЛЕЙ В ИИ-АГЕНТОВ')
+        self.geometry('900x760')
+        self.minsize(780, 620)
+        self.configure(bg=_b.bg)
+        self.transient(app.root)
+        self.grab_set()
+        saved = _ac()
+        saved_agents = [a for a in saved.get('agents') or [] if a in AGENT_IDS]
+        saved_profiles = list(saved.get('profiles') or [])
+        self.agent_vars = {}
+        self.profile_vars = {}
+        self.var_profile_filter = tk.StringVar(master=self)
+        self.var_profile_filter.trace_add('write', lambda *a: self._render_profiles())
+        self._result = None
+        self.home = home
+        self.catalog = _aq(home=self.home, config_path=str(app.config_path))
+        for item in self.catalog:
+            self.agent_vars[item['id']] = tk.BooleanVar(master=self, value=item['id'] in saved_agents)
+        for profile in app.profiles:
+            self.profile_vars[profile['id']] = tk.BooleanVar(master=self, value=profile['id'] in saved_profiles or not saved_profiles)
+        self._build()
+        try:
+            app.clipboard.bind_tree(self)
+        except Exception:
+            pass
+        self.bind('<Escape>', lambda e: self.destroy())
+
+    def _build(self):
+        head = tk.Frame(self, bg=_b.bg)
+        head.pack(fill='x', padx=16, pady=(14, 2))
+        tk.Label(head, text='ПЕРЕНОС ПРОФИЛЕЙ В ИИ-АГЕНТОВ', bg=_b.bg, fg=_b.cyan, font=_b.mono_title).pack(anchor='w')
+        tk.Label(head, text='Отметьте агентов и профили — профили попадут в конфиги агентов.', bg=_b.bg, fg=_b.ink_dim, font=_b.mono_small).pack(anchor='w', pady=(2, 0))
+        _e(self, color=_b.cyan).pack(fill='x', padx=16, pady=(6, 6))
+        mid = tk.Frame(self, bg=_b.bg)
+        mid.pack(fill='both', expand=True, padx=16)
+        mid.columnconfigure(0, weight=1)
+        mid.columnconfigure(1, weight=1)
+        mid.rowconfigure(0, weight=1)
+        apanel = _d(mid, radius=16, fill=_b.bg_panel, outline=_b.cyan_dim, thickness=1, bg=_b.bg)
+        apanel.grid(row=0, column=0, sticky='nsew', padx=(0, 6), pady=2)
+        abox = apanel.inner
+        ahead = tk.Frame(abox, bg=_b.bg_panel)
+        ahead.pack(fill='x', padx=10, pady=(8, 4))
+        tk.Label(ahead, text='ИИ-АГЕНТЫ', bg=_b.bg_panel, fg=_b.cyan, font=_b.mono_title).pack(side='left')
+        self.lbl_agents = tk.Label(ahead, text='', bg=_b.bg_panel, fg=_b.amber, font=_b.mono_small)
+        self.lbl_agents.pack(side='right')
+        arow = tk.Frame(abox, bg=_b.bg_panel)
+        arow.pack(fill='x', padx=10, pady=(0, 6))
+        ttk.Button(arow, text='☑ ВСЕ', width=8, style='Accent.TButton', command=lambda: self._set_agents(True)).pack(side='left', padx=2)
+        ttk.Button(arow, text='☐ НИЧЕГО', width=10, command=lambda: self._set_agents(False)).pack(side='left', padx=2)
+        self._agent_canvas = tk.Canvas(abox, bg=_b.bg_panel, highlightthickness=0)
+        asb = ttk.Scrollbar(abox, orient='vertical', command=self._agent_canvas.yview)
+        self._agent_canvas.configure(yscrollcommand=asb.set)
+        self._agent_inner = tk.Frame(self._agent_canvas, bg=_b.bg_panel)
+        self._agent_window = self._agent_canvas.create_window((0, 0), window=self._agent_inner, anchor='nw')
+        self._agent_inner.bind('<Configure>', lambda e: self._agent_canvas.configure(scrollregion=self._agent_canvas.bbox('all')))
+        self._agent_canvas.bind('<Configure>', lambda e: self._agent_canvas.itemconfigure(self._agent_window, width=e.width))
+        self._agent_canvas.pack(fill='both', expand=True, padx=(10, 0), pady=(0, 8))
+        asb.pack(side='right', fill='y', padx=(0, 10), pady=(0, 8))
+        self._agent_canvas.bind('<Enter>', self._bind_agent_wheel)
+        self._agent_canvas.bind('<Leave>', self._unbind_agent_wheel)
+        self._render_agents()
+        ppanel = _d(mid, radius=16, fill=_b.bg_panel, outline=_b.cyan_dim, thickness=1, bg=_b.bg)
+        ppanel.grid(row=0, column=1, sticky='nsew', padx=(6, 0), pady=2)
+        pbox = ppanel.inner
+        phead = tk.Frame(pbox, bg=_b.bg_panel)
+        phead.pack(fill='x', padx=10, pady=(8, 4))
+        tk.Label(phead, text='ПРОФИЛИ ДЛЯ ПЕРЕНОСА', bg=_b.bg_panel, fg=_b.cyan, font=_b.mono_title).pack(side='left')
+        self.lbl_profiles = tk.Label(phead, text='', bg=_b.bg_panel, fg=_b.amber, font=_b.mono_small)
+        self.lbl_profiles.pack(side='right')
+        prow = tk.Frame(pbox, bg=_b.bg_panel)
+        prow.pack(fill='x', padx=10, pady=(0, 4))
+        ttk.Button(prow, text='☑ ВСЕ', width=8, style='Accent.TButton', command=lambda: self._set_profiles(True)).pack(side='left', padx=2)
+        ttk.Button(prow, text='☐ НИЧЕГО', width=10, command=lambda: self._set_profiles(False)).pack(side='left', padx=2)
+        ttk.Entry(prow, textvariable=self.var_profile_filter, font=_b.mono, width=18).pack(side='right', padx=2)
+        self._profile_canvas = tk.Canvas(pbox, bg=_b.bg_panel, highlightthickness=0)
+        psb = ttk.Scrollbar(pbox, orient='vertical', command=self._profile_canvas.yview)
+        self._profile_canvas.configure(yscrollcommand=psb.set)
+        self._profile_inner = tk.Frame(self._profile_canvas, bg=_b.bg_panel)
+        self._profile_window = self._profile_canvas.create_window((0, 0), window=self._profile_inner, anchor='nw')
+        self._profile_inner.bind('<Configure>', lambda e: self._profile_canvas.configure(scrollregion=self._profile_canvas.bbox('all')))
+        self._profile_canvas.bind('<Configure>', lambda e: self._profile_canvas.itemconfigure(self._profile_window, width=e.width))
+        self._profile_canvas.pack(fill='both', expand=True, padx=(10, 0), pady=(0, 8))
+        psb.pack(side='right', fill='y', padx=(0, 10), pady=(0, 8))
+        self._profile_canvas.bind('<Enter>', self._bind_profile_wheel)
+        self._profile_canvas.bind('<Leave>', self._unbind_profile_wheel)
+        self._render_profiles()
+        rep_panel = _d(self, radius=12, fill=_b.bg_panel, outline=_b.line, thickness=1, bg=_b.bg, height=104)
+        rep_panel.pack(fill='x', padx=16, pady=(6, 0))
+        rep_box = rep_panel.inner
+        self.txt_report = tk.Text(rep_box, height=5, bg=_b.bg_panel, fg=_b.cyan_soft, font=_b.mono_small, relief='flat', bd=0, wrap='word', highlightthickness=0, insertbackground=_b.cyan)
+        rsb = ttk.Scrollbar(rep_box, orient='vertical', command=self.txt_report.yview)
+        self.txt_report.configure(yscrollcommand=rsb.set)
+        self.txt_report.pack(side='left', fill='both', expand=True)
+        rsb.pack(side='right', fill='y')
+        self.txt_report.insert('1.0', 'Отметьте агентов и профили, затем «ИМПОРТ В АГЕНТОВ».')
+        self.txt_report.configure(state='disabled')
+        foot = tk.Frame(self, bg=_b.bg)
+        foot.pack(fill='x', padx=16, pady=(8, 12), side='bottom')
+        ttk.Button(foot, text='ЗАКРЫТЬ', command=self.destroy).pack(side='right', padx=4)
+        self.btn_import = ttk.Button(foot, text='ИМПОРТ В АГЕНТОВ', style='Accent.TButton', command=self._import)
+        self.btn_import.pack(side='right', padx=4)
+        ttk.Button(foot, text='ТОЛЬКО ОТЧЁТ (ПРОВЕРКА)', command=lambda: self._import(dry_run=True)).pack(side='left', padx=4)
+
+    def _bind_agent_wheel(self, _=None):
+        self._agent_canvas.bind_all('<MouseWheel>', self._on_agent_wheel)
+
+    def _unbind_agent_wheel(self, _=None):
+        try:
+            self._agent_canvas.unbind_all('<MouseWheel>')
+        except Exception:
+            pass
+
+    def _on_agent_wheel(self, event):
+        try:
+            self._agent_canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+        except Exception:
+            pass
+
+    def _bind_profile_wheel(self, _=None):
+        self._profile_canvas.bind_all('<MouseWheel>', self._on_profile_wheel)
+
+    def _unbind_profile_wheel(self, _=None):
+        try:
+            self._profile_canvas.unbind_all('<MouseWheel>')
+        except Exception:
+            pass
+
+    def _on_profile_wheel(self, event):
+        try:
+            self._profile_canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+        except Exception:
+            pass
+
+    def _render_agents(self):
+        for child in list(self._agent_inner.winfo_children()):
+            child.destroy()
+        for item in self.catalog:
+            var = self.agent_vars[item['id']]
+            row = tk.Frame(self._agent_inner, bg=_b.bg_panel)
+            row.pack(fill='x', pady=1)
+            tk.Checkbutton(row, text=item['title'], variable=var, bg=_b.bg_panel, fg=_b.ink, selectcolor=_b.bg_input, activebackground=_b.bg_panel, activeforeground=_b.cyan, font=_b.mono_small, bd=0, anchor='w', highlightthickness=0, command=self._update_counts).pack(side='left', anchor='w')
+            mark = '●' if item['exists'] else '○'
+            color = _b.green if item['exists'] else _b.cyan_dim
+            tk.Label(row, text=mark, bg=_b.bg_panel, fg=color, font=_b.mono_small).pack(side='right', padx=(4, 2))
+            desc = tk.Label(self._agent_inner, text=item['description'], bg=_b.bg_panel, fg=_b.ink_dim, font=_b.mono_small, anchor='w', justify='left', wraplength=360)
+            desc.pack(fill='x', padx=(24, 4))
+            path = tk.Label(self._agent_inner, text=str(item['path']), bg=_b.bg_panel, fg=_b.cyan_dim, font=_b.mono_small, anchor='w', justify='left', wraplength=360)
+            path.pack(fill='x', padx=(24, 4), pady=(0, 4))
+        self._update_counts()
+
+    def _render_profiles(self):
+        for child in list(self._profile_inner.winfo_children()):
+            child.destroy()
+        needle = (self.var_profile_filter.get() or '').strip().lower()
+        for profile in self.app.profiles:
+            pid = profile['id']
+            text = '%s  (%s)' % (profile.get('display_name') or pid, pid)
+            if needle and needle not in text.lower():
+                continue
+            var = self.profile_vars.get(pid)
+            if var is None:
+                var = tk.BooleanVar(master=self, value=True)
+                self.profile_vars[pid] = var
+            cb = tk.Checkbutton(self._profile_inner, text=text, variable=var, bg=_b.bg_panel, fg=_b.ink, selectcolor=_b.bg_input, activebackground=_b.bg_panel, activeforeground=_b.cyan, font=_b.mono_small, bd=0, anchor='w', highlightthickness=0, command=self._update_counts)
+            cb.pack(fill='x', padx=4, pady=1)
+            tk.Label(self._profile_inner, text=str(profile.get('base_url') or ''), bg=_b.bg_panel, fg=_b.cyan_dim, font=_b.mono_small, anchor='w').pack(fill='x', padx=(24, 4))
+        self._update_counts()
+
+    def _update_counts(self):
+        try:
+            agents = [a for a in AGENT_IDS if self.agent_vars[a].get()]
+            profiles = [p for p, v in self.profile_vars.items() if v.get()]
+            self.lbl_agents.configure(text='ВЫБРАНО: %d / %d' % (len(agents), len(AGENT_IDS)))
+            self.lbl_profiles.configure(text='ВЫБРАНО: %d / %d' % (len(profiles), len(self.app.profiles)))
+        except Exception:
+            pass
+
+    def _set_agents(self, value):
+        for var in self.agent_vars.values():
+            var.set(value)
+        self._update_counts()
+
+    def _set_profiles(self, value):
+        for var in self.profile_vars.values():
+            var.set(value)
+        self._update_counts()
+
+    def _selection(self):
+        agents = [a for a in AGENT_IDS if self.agent_vars[a].get()]
+        ids = [p for p, v in self.profile_vars.items() if v.get()]
+        profiles = [p for p in self.app.profiles if p['id'] in ids]
+        return (agents, profiles)
+
+    def _import(self, dry_run=False):
+        agents, profiles = self._selection()
+        if not agents:
+            messagebox.showinfo('Перенос', 'Отметьте хотя бы одного агента', parent=self)
+            return
+        if not profiles:
+            messagebox.showinfo('Перенос', 'Отметьте хотя бы один профиль', parent=self)
+            return
+        _ad({'agents': agents, 'profiles': [p['id'] for p in profiles]})
+        if dry_run:
+            lines = ['Проверка (файлы не изменяются):']
+            for agent in agents:
+                item = next((c for c in self.catalog if c['id'] == agent), None)
+                where = item['path'] if item else '—'
+                if agent == 'vscode':
+                    lines.append('  • %s → расширение %s + %s' % (item['title'] if item else agent, VSCODE_EXT_ID, _ag(self.home)))
+                else:
+                    lines.append('  • %s → %s' % (agent, where))
+            lines.append('Профилей: %d' % len(profiles))
+            self._report('\n'.join(lines))
+            return
+        self.btn_import.configure(state='disabled')
+        try:
+            results = _bp(profiles, self.app.var_default_model.get(), agents, home=self.home, config_path=self.app.config_path)
+        finally:
+            try:
+                self.btn_import.configure(state='normal')
+            except Exception:
+                pass
+        lines = []
+        for res in results:
+            mark = 'OK ' if res.get('ok') else 'ОШИБКА '
+            where = str(res.get('path') or '—')
+            lines.append('%s%s\n    %s\n    %s' % (mark, res.get('title') or res.get('agent'), where, res.get('message') or ''))
+        ok = sum((1 for r in results if r.get('ok')))
+        header = 'ГОТОВО: УСПЕШНО %d ИЗ %d' % (ok, len(results))
+        if ok != len(results):
+            header = 'ЗАВЕРШЕНО С ОШИБКАМИ: УСПЕШНО %d ИЗ %d' % (ok, len(results))
+        self._report(header + '\n\n' + '\n\n'.join(lines))
+        self._result = results
+        self.app._set_status('ПЕРЕНОС В АГЕНТОВ: УСПЕШНО %d ИЗ %d' % (ok, len(results)))
+
+    def _report(self, text):
+        try:
+            self.txt_report.configure(state='normal')
+            self.txt_report.delete('1.0', 'end')
+            self.txt_report.insert('1.0', text)
+            self.txt_report.configure(state='disabled')
+            self.txt_report.see('1.0')
+        except Exception:
+            pass
+
 class App:
 
     def __init__(self):
@@ -2583,17 +3507,17 @@ class App:
         self._build_root()
         self.load()
         try:
-            self.aos = _at(self)
+            self.aos = _b9(self)
             if self.aos.enabled:
                 self.root.after(600, self.aos.show)
         except Exception:
             self.aos = None
         try:
-            self.tray = _am(self, icon_path=_au())
+            self.tray = _b2(self, icon_path=_ca())
             self.root.after(400, self._install_tray)
         except Exception:
             self.tray = None
-        if _a8():
+        if _cp():
             try:
                 self.root.withdraw()
             except Exception:
@@ -2606,7 +3530,7 @@ class App:
         self.root.minsize(960, 640)
         self.root.configure(bg=_b.bg)
         _c(self.root)
-        self.clipboard = _al(self.root)
+        self.clipboard = _b1(self.root)
         self._build()
         try:
             self.clipboard.bind_tree(self.root)
@@ -2853,7 +3777,7 @@ class App:
         self.lst_models.delete(0, 'end')
 
     def add_profile(self):
-        dlg = _aa(self, None)
+        dlg = _bq(self, None)
         self.root.wait_window(dlg)
         res = dlg.result
         if not res:
@@ -2873,7 +3797,7 @@ class App:
         profile = self._find(self.selected)
         if not profile:
             return
-        dlg = _aa(self, profile)
+        dlg = _bq(self, profile)
         self.root.wait_window(dlg)
         res = dlg.result
         if not res:
@@ -3144,7 +4068,7 @@ class App:
     def _aos(self):
         if getattr(self, 'aos', None) is None:
             try:
-                self.aos = _at(self)
+                self.aos = _b9(self)
             except Exception:
                 self.aos = None
         return self.aos
@@ -3189,7 +4113,7 @@ class App:
         except Exception:
             pass
         try:
-            dlg = _a0(self, aos)
+            dlg = _cg(self, aos)
             try:
                 dlg.deiconify()
                 dlg.lift()
@@ -3219,7 +4143,7 @@ class App:
             info.configure(text='Снимков: %d  •  последний: %s' % (len(self._history), last))
 
     def open_history(self):
-        _ab(self)
+        _br(self)
 
     def snapshot_now(self, reason=''):
         try:
@@ -3347,10 +4271,17 @@ class App:
         self._set_status('ИМПОРТИРОВАНО ПРОФИЛЕЙ: %d (новых %d, заменено %d) — НЕ СОХРАНЁН' % (len(imported), added, replaced))
         messagebox.showinfo('Импорт', 'Импортировано профилей: %d\nНовых: %d\nЗаменено: %d\n\nНе забудьте «ПРИМЕНИТЬ К КОНФИГУ».' % (len(imported), added, replaced), parent=self.root)
 
+    def open_agents_dialog(self):
+        if not self.profiles:
+            messagebox.showinfo('Перенос в агентов', 'Список профилей пуст — сначала добавьте профиль', parent=self.root)
+            return
+        dlg = _ch(self)
+        self.root.wait_window(dlg)
+
     def run(self):
         self.root.mainloop()
 
-def _a1(module: str) -> bool:
+def _ci(module: str) -> bool:
     try:
         __import__(module)
         return True
@@ -3359,7 +4290,7 @@ def _a1(module: str) -> bool:
 REQUIRED = {'certifi': ('certifi', 'актуальные корневые сертификаты для TLS')}
 OPTIONAL = {'PIL': ('Pillow', 'запасной захват экрана диагностики')}
 
-def _a2(pkg: str) -> tuple[bool, str]:
+def _cj(pkg: str) -> tuple[bool, str]:
     import subprocess
     try:
         proc = subprocess.run([sys.executable, '-m', 'pip', 'install', '--user', '--upgrade', '--quiet', pkg], capture_output=True, text=True, timeout=240)
@@ -3370,17 +4301,17 @@ def _a2(pkg: str) -> tuple[bool, str]:
     except Exception as exc:
         return (False, str(exc))
 
-def _a3() -> list:
+def _ck() -> list:
     notes = []
-    if not _a1('tkinter'):
+    if not _ci('tkinter'):
         return ['tkinter не найден — переустановите Python с компонентом Tcl/Tk']
     needed = []
     for module, (pkg, why) in REQUIRED.items():
-        if not _a1(module):
+        if not _ci(module):
             needed.append((pkg, why))
     if getattr(sys, 'frozen', False):
         needed = []
-    if needed and (not _a1('pip')):
+    if needed and (not _ci('pip')):
         if getattr(sys, 'frozen', False):
             return notes
         try:
@@ -3388,19 +4319,19 @@ def _a3() -> list:
             ensurepip.bootstrap()
         except Exception:
             pass
-    if needed and (not _a1('pip')):
+    if needed and (not _ci('pip')):
         notes.append('pip недоступен — автодогрузка невозможна (python -m ensurepip)')
         return notes
     for pkg, why in needed:
         notes.append('Догружаю %s — %s…' % (pkg, why))
-        ok, err = _a2(pkg)
-        if ok and _a1(pkg):
+        ok, err = _cj(pkg)
+        if ok and _ci(pkg):
             notes.append('%s установлен' % pkg)
         else:
             notes.append('%s не установился: %s' % (pkg, err or 'неизвестная ошибка'))
     return notes
 
-def _a4():
+def _cl():
     if os.name != 'nt':
         return
     try:
@@ -3414,7 +4345,7 @@ def _a4():
 _AUTOSTART_KEY = 'Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run'
 _AUTOSTART_NAME = 'OpenCodeProviderManager'
 
-def _a5():
+def _cm():
     if getattr(sys, 'frozen', False):
         return '"%s" --tray' % sys.executable
     script = Path(__file__).resolve()
@@ -3422,7 +4353,7 @@ def _a5():
     exe = pyw if pyw.exists() else Path(sys.executable)
     return '"%s" "%s" --tray' % (exe, script)
 
-def _a6() -> bool:
+def _cn() -> bool:
     try:
         import winreg
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _AUTOSTART_KEY) as key:
@@ -3431,12 +4362,12 @@ def _a6() -> bool:
     except Exception:
         return False
 
-def _a7(enabled: bool) -> bool:
+def _co(enabled: bool) -> bool:
     try:
         import winreg
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _AUTOSTART_KEY, 0, winreg.KEY_SET_VALUE) as key:
             if enabled:
-                winreg.SetValueEx(key, _AUTOSTART_NAME, 0, winreg.REG_SZ, _a5())
+                winreg.SetValueEx(key, _AUTOSTART_NAME, 0, winreg.REG_SZ, _cm())
             else:
                 try:
                     winreg.DeleteValue(key, _AUTOSTART_NAME)
@@ -3446,7 +4377,7 @@ def _a7(enabled: bool) -> bool:
     except Exception:
         return False
 
-def _a8() -> bool:
+def _cp() -> bool:
     try:
         return '--tray' in sys.argv
     except Exception:
@@ -3455,7 +4386,7 @@ _SINGLE_INSTANCE_HANDLE = None
 _MUTEX_NAME = 'Global\\OpenCodeProviderManager.SingleInstance'
 _FIND_WINDOW_TITLE = 'OpenCode — менеджер провайдеров'
 
-def _a9():
+def _cq():
     global _SINGLE_INSTANCE_HANDLE
     try:
         import ctypes
@@ -3476,7 +4407,7 @@ def _a9():
     except Exception:
         return True
 
-def _ba():
+def _cr():
     try:
         import ctypes
         from ctypes import wintypes
@@ -3493,7 +4424,7 @@ def _ba():
     except Exception:
         return False
 
-def _bb():
+def _cs():
     try:
         import ctypes
         ctypes.windll.user32.MessageBoxW(None, 'Менеджер OpenCode уже запущен.\n\nОкно приложения восстановлено.', 'OpenCode — менеджер провайдеров', 64)
@@ -3501,12 +4432,12 @@ def _bb():
         pass
 
 def main():
-    _a4()
-    if not _a9():
-        if not _ba():
-            _bb()
+    _cl()
+    if not _cq():
+        if not _cr():
+            _cs()
         return 0
-    notes = _a3()
+    notes = _ck()
     app = App()
     if notes:
         app._set_status('  •  '.join(notes))
