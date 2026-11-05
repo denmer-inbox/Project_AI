@@ -813,6 +813,11 @@ def build_provider(profile: dict) -> dict:
 
 
 def apply_profiles(config: dict, profiles: list) -> dict:
+    """Полная запись списка профилей (кнопка «ПРИМЕНИТЬ К КОНФИГУ»).
+
+    Заменяет providers целиком — это правильно только когда передан ВЕСЬ
+    список профилей из главного окна.
+    """
     new = copy.deepcopy(config)
     if not isinstance(new.get("providers"), dict):
         new["providers"] = {}
@@ -821,6 +826,69 @@ def apply_profiles(config: dict, profiles: list) -> dict:
     pid = parse_model_ref(ref)[0]
     if ref and pid not in new["providers"]:
         new.pop("model", None)
+    return new
+
+
+def merge_profiles_into_config(config: dict, profiles: list) -> dict:
+    """Аккуратно дописывает профили в конфиг, НЕ трогая остальные.
+
+    Нужна для переноса в агентов: там пользователь отмечает произвольный
+    поднабор профилей, и стирать непереданные провайдеры или помечать их
+    модели `disabled` нельзя. Остальные провайдеры, их модели, mcp, agent,
+    skills и прочие ключи остаются как были.
+    """
+    new = copy.deepcopy(config)
+    providers = new.get("providers")
+    if not isinstance(providers, dict):
+        providers = {}
+        new["providers"] = providers
+    for profile in profiles:
+        pid = profile.get("id")
+        if not pid:
+            continue
+        existing = providers.get(pid) if isinstance(providers.get(pid), dict) else {}
+        raw = profile.get("_raw")
+        # основа — то, что уже лежит в конфиге; поверх кладём «сырой» объект
+        # профиля, но модели объединяем, а не заменяем
+        base = copy.deepcopy(existing)
+        if isinstance(raw, dict):
+            for key, value in raw.items():
+                if key == "models":
+                    continue
+                base[key] = copy.deepcopy(value)
+            raw_models = raw.get("models")
+            if isinstance(raw_models, dict):
+                merged = raw_models if isinstance(base.get("models"), dict) else {}
+                for mid, spec in base.get("models", {}).items():
+                    merged.setdefault(mid, spec)
+                base["models"] = merged
+        settings = {}
+        base_url = normalize_base_url(profile.get("base_url", ""))
+        if base_url:
+            settings["baseURL"] = base_url
+        if profile.get("api_key"):
+            settings["apiKey"] = profile["api_key"]
+        for key, value in (profile.get("extra_settings") or {}).items():
+            settings[key] = value
+        base["name"] = profile.get("display_name") or pid
+        base["package"] = profile.get("package") or PACKAGES[0]
+        if settings:
+            base["settings"] = settings
+        coef = str(profile.get("coefficient") or "").strip()
+        if coef:
+            base["_coefficient"] = coef
+        # модели: отмеченные добавляем/включаем, остальные НЕ трогаем.
+        # Скрывать чужие модели здесь нельзя: перенос не должен менять то,
+        # что пользователь не выбирал (иначе пропадали модели из OpenCode).
+        old_models = base.get("models") if isinstance(base.get("models"), dict) else {}
+        old_models = dict(old_models) if isinstance(old_models, dict) else {}
+        for mid in list(profile.get("models") or []):
+            spec = model_spec({"id": mid}, old_models.get(mid))
+            spec.pop("disabled", None)
+            old_models[mid] = spec
+        if old_models:
+            base["models"] = old_models
+        providers[pid] = base
     return new
 
 
@@ -1259,9 +1327,10 @@ def _resolve_config_path(config_path, home=None) -> Path:
 
 
 def _transfer_opencode(profiles, default_model, config_path=None, home=None):
+    """Дописывает профили в opencode.json, не затирая остальные провайдеры."""
     path = Path(config_path) if config_path else _resolve_config_path(None, home)
     config = load_config(path)
-    new_config = apply_profiles(config, profiles)
+    new_config = merge_profiles_into_config(config, profiles)
     ref = (default_model or "").strip()
     if ref and ref != "(не задана)":
         new_config["model"] = ref
@@ -1269,7 +1338,7 @@ def _transfer_opencode(profiles, default_model, config_path=None, home=None):
     return {
         "agent": "opencode", "title": "OpenCode (этот конфиг)", "ok": True,
         "path": path, "backup": backup,
-        "message": "Записано профилей: %d" % len(profiles),
+        "message": "Записано профилей: %d (остальные не тронуты)" % len(profiles),
     }
 
 
@@ -3768,6 +3837,11 @@ class AOSOverlay:
             pass
 
     def _schedule_refresh(self, immediate=True):
+        """Перезапускает таймер автообновления баланса.
+
+        immediate=True — сразу запросить баланс (старт, тик, смена настроек),
+        immediate=False — только поставить таймер.
+        """
         if self.win is None or not self.win.winfo_exists():
             return
         # отменяем прежний таймер, иначе они накапливаются и шлют пачку запросов
@@ -3780,7 +3854,10 @@ class AOSOverlay:
         sec = max(60, int(self.settings.get("refresh_sec", 60)))
         if immediate:
             try:
-                self.app.request_balance(silent=True)
+                # force=True обязателен: интервал автообновления (по умолчанию
+                # 60 с) и TTL свежести баланса (60 с) совпадают, поэтому без
+                # force тик считал бы баланс «ещё свежим» и ничего не запрашивал.
+                self.app.request_balance(silent=True, force=True)
             except Exception:
                 pass
         try:
@@ -3790,6 +3867,10 @@ class AOSOverlay:
 
     def _tick(self):
         self._after_id = None
+        self._schedule_refresh(immediate=True)
+
+    def restart_timer(self):
+        """Перезапускает автообновление с новым интервалом (после смены настроек)."""
         self._schedule_refresh(immediate=True)
 
 
@@ -4209,6 +4290,7 @@ class AOSSettingsDialog(tk.Toplevel):
         s = self.aos.settings
         prev_preset = s.get("preset")
         prev_profiles = list(s.get("profiles") or [])
+        prev_refresh = s.get("refresh_sec")
         s["preset"] = self.var_preset.get()
         s["opacity"] = round(float(self.var_opacity.get()), 2)
         s["refresh_sec"] = max(60, int(self.var_refresh.get()))
@@ -4242,6 +4324,14 @@ class AOSSettingsDialog(tk.Toplevel):
 
         self.aos.refresh()
         self.aos.apply_click_through()
+
+        # Смена интервала должна немедленно перезапустить таймер: иначе новый
+        # период начнёт действовать только после старого (до 5 минут).
+        if prev_refresh != s.get("refresh_sec"):
+            try:
+                self.aos.restart_timer()
+            except Exception:
+                pass
 
         if prev_preset != s["preset"]:
             self.aos._build_content(self.aos.win)

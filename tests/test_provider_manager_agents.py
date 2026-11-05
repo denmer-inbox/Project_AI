@@ -337,6 +337,54 @@ def test_transfer_to_opencode_writes_providers(manager, tmp_path):
     assert results[0]["path"] == config
 
 
+def test_transfer_to_opencode_keeps_other_providers_and_models(manager, tmp_path):
+    """Перенос поднабора профилей не должен трогать остальное.
+
+    Регрессия: раньше apply_profiles заменял providers целиком, из-за чего
+    из рабочего конфига пропадали провайдеры, а модели помечались disabled.
+    """
+    config = tmp_path / "opencode.json"
+    config.write_text(json.dumps({
+        "$schema": "https://opencode.ai/config.json",
+        "model": "big/m1",
+        "agent": {"plan": {"description": "Read-only planning agent."}},
+        "skills": ["skills"],
+        "mcp": {"rea": {"type": "local", "command": ["cmd"], "enabled": True}},
+        "providers": {
+            "big": {
+                "name": "Big",
+                "package": manager.PACKAGES[0],
+                "settings": {"baseURL": "https://big.example/v1", "apiKey": "k1"},
+                "models": {"m1": {"name": "m1"}, "m2": {"name": "m2"},
+                           "m3": {"name": "m3"}},
+            },
+            "other": {
+                "name": "Other",
+                "package": manager.PACKAGES[0],
+                "settings": {"baseURL": "https://other.example/v1", "apiKey": "k2"},
+                "models": {"o1": {"name": "o1"}},
+            },
+        },
+    }, indent=2), encoding="utf-8")
+
+    manager.transfer_profiles(
+        [_profile("big", ["m1"], base_url="https://big.example/v1",
+                  key="k1")], "", ["opencode"], config_path=config)
+
+    doc = json.loads(config.read_text(encoding="utf-8"))
+    assert doc["$schema"] == "https://opencode.ai/config.json"
+    assert doc["agent"] == {"plan": {"description": "Read-only planning agent."}}
+    assert doc["skills"] == ["skills"]
+    assert doc["mcp"]["rea"]["enabled"] is True
+    assert doc["model"] == "big/m1"
+    assert sorted(doc["providers"]) == ["big", "other"]
+    assert sorted(doc["providers"]["big"]["models"]) == ["m1", "m2", "m3"]
+    assert doc["providers"]["other"]["models"] == {"o1": {"name": "o1"}}
+    hidden = [mid for mid, spec in doc["providers"]["big"]["models"].items()
+              if isinstance(spec, dict) and spec.get("disabled")]
+    assert hidden == []
+
+
 def test_transfer_without_profiles_reports_error(manager, tmp_path):
     results = manager.transfer_profiles([], "", ["continue"], home=tmp_path)
 

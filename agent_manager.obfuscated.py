@@ -625,21 +625,71 @@ def _6(config: dict, profiles: list) -> dict:
     if ref and pid not in new['providers']:
         new.pop('model', None)
     return new
+
+def _7(config: dict, profiles: list) -> dict:
+    new = copy.deepcopy(config)
+    providers = new.get('providers')
+    if not isinstance(providers, dict):
+        providers = {}
+        new['providers'] = providers
+    for profile in profiles:
+        pid = profile.get('id')
+        if not pid:
+            continue
+        existing = providers.get(pid) if isinstance(providers.get(pid), dict) else {}
+        raw = profile.get('_raw')
+        base = copy.deepcopy(existing)
+        if isinstance(raw, dict):
+            for key, value in raw.items():
+                if key == 'models':
+                    continue
+                base[key] = copy.deepcopy(value)
+            raw_models = raw.get('models')
+            if isinstance(raw_models, dict):
+                merged = raw_models if isinstance(base.get('models'), dict) else {}
+                for mid, spec in base.get('models', {}).items():
+                    merged.setdefault(mid, spec)
+                base['models'] = merged
+        settings = {}
+        base_url = _s(profile.get('base_url', ''))
+        if base_url:
+            settings['baseURL'] = base_url
+        if profile.get('api_key'):
+            settings['apiKey'] = profile['api_key']
+        for key, value in (profile.get('extra_settings') or {}).items():
+            settings[key] = value
+        base['name'] = profile.get('display_name') or pid
+        base['package'] = profile.get('package') or PACKAGES[0]
+        if settings:
+            base['settings'] = settings
+        coef = str(profile.get('coefficient') or '').strip()
+        if coef:
+            base['_coefficient'] = coef
+        old_models = base.get('models') if isinstance(base.get('models'), dict) else {}
+        old_models = dict(old_models) if isinstance(old_models, dict) else {}
+        for mid in list(profile.get('models') or []):
+            spec = _2({'id': mid}, old_models.get(mid))
+            spec.pop('disabled', None)
+            old_models[mid] = spec
+        if old_models:
+            base['models'] = old_models
+        providers[pid] = base
+    return new
 EXPORT_TYPE = 'opencode-provider-profiles'
 EXPORT_VERSION = 2
 EXPORT_TYPE_SINGLE = 'opencode-provider-profile'
 
-def _7(profile: dict) -> dict:
+def _8(profile: dict) -> dict:
     return {'id': profile['id'], 'display_name': profile['display_name'], 'coefficient': str(profile.get('coefficient') or ''), 'base_url': profile['base_url'], 'package': profile['package'], 'api_key': profile['api_key'], 'models': list(profile['models']), 'known_models': list(profile['known_models']), 'extra_settings': profile.get('extra_settings') or {}, 'raw': profile.get('_raw') or {}}
 
-def _8(profiles: list, default_model: str='') -> dict:
-    payload = {'version': EXPORT_VERSION, 'type': EXPORT_TYPE, 'profiles': [_7(p) for p in profiles]}
+def _9(profiles: list, default_model: str='') -> dict:
+    payload = {'version': EXPORT_VERSION, 'type': EXPORT_TYPE, 'profiles': [_8(p) for p in profiles]}
     ref = (default_model or '').strip()
     if ref and ref != '(не задана)':
         payload['default_model'] = ref
     return payload
 
-def _9(raw: dict) -> dict:
+def _aa(raw: dict) -> dict:
     if not isinstance(raw, dict):
         raise ValueError('запись профиля не является объектом JSON')
     pid = str(raw.get('id') or '').strip()
@@ -649,7 +699,7 @@ def _9(raw: dict) -> dict:
     known = [str(m) for m in raw.get('known_models') or models if str(m).strip()]
     return {'id': pid, 'display_name': raw.get('display_name') or pid, 'coefficient': str(raw.get('coefficient') or ''), 'base_url': raw.get('base_url') or '', 'api_key': raw.get('api_key') or '', 'package': raw.get('package') or PACKAGES[0], 'models': models, 'known_models': known, 'extra_settings': raw.get('extra_settings') or {}, '_raw': raw.get('raw') or None}
 
-def _aa(data) -> tuple:
+def _ab(data) -> tuple:
     if isinstance(data, list):
         entries, default_model = (data, '')
     elif isinstance(data, dict):
@@ -665,7 +715,7 @@ def _aa(data) -> tuple:
     result = []
     for idx, entry in enumerate(entries, 1):
         try:
-            result.append(_9(entry))
+            result.append(_aa(entry))
         except ValueError as exc:
             raise ValueError('Профиль №%d: %s' % (idx, exc))
     if not result:
@@ -675,13 +725,13 @@ AGENT_IDS = ('opencode', 'vscode', 'cline', 'continue', 'codex', 'claude', 'aide
 AGENTS_FILE_NAME = 'agents.json'
 CONTINUE_ROLES = ['chat', 'edit', 'apply']
 
-def _ab() -> Path:
+def _ac() -> Path:
     return _b() / AGENTS_FILE_NAME
 
-def _ac() -> dict:
+def _ad() -> dict:
     defaults = {'agents': [], 'profiles': []}
     try:
-        path = _ab()
+        path = _ac()
         if path.exists():
             data = json.loads(path.read_text(encoding='utf-8-sig'))
             if isinstance(data, dict):
@@ -692,70 +742,70 @@ def _ac() -> dict:
         pass
     return defaults
 
-def _ad(settings: dict) -> None:
+def _ae(settings: dict) -> None:
     try:
-        path = _ab()
+        path = _ac()
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {key: settings.get(key) for key in ('agents', 'profiles')}
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding='utf-8')
     except Exception:
         pass
 
-def _ae(home=None) -> Path:
+def _af(home=None) -> Path:
     return Path(home) if home else Path(os.path.expanduser('~'))
 
-def _af(home=None) -> Path:
+def _ag(home=None) -> Path:
     if home:
-        return _ae(home) / 'AppData' / 'Roaming' / 'Code' / 'User'
+        return _af(home) / 'AppData' / 'Roaming' / 'Code' / 'User'
     appdata = os.environ.get('APPDATA')
-    base = Path(appdata) if appdata else _ae() / 'AppData' / 'Roaming'
+    base = Path(appdata) if appdata else _af() / 'AppData' / 'Roaming'
     return base / 'Code' / 'User'
 
-def _ag(home=None) -> Path:
-    return _af(home) / 'settings.json'
-
 def _ah(home=None) -> Path:
-    return _ae(home) / '.vscode' / 'extensions'
+    return _ag(home) / 'settings.json'
 
 def _ai(home=None) -> Path:
-    return _ae(home) / 'opencode-lm-vscode'
+    return _af(home) / '.vscode' / 'extensions'
 
 def _aj(home=None) -> Path:
-    return _ae(home) / '.continue' / 'config.yaml'
+    return _af(home) / 'opencode-lm-vscode'
 
 def _ak(home=None) -> Path:
-    return _ae(home) / '.codex' / 'config.toml'
+    return _af(home) / '.continue' / 'config.yaml'
 
 def _al(home=None) -> Path:
-    return _ae(home) / '.claude' / 'settings.json'
+    return _af(home) / '.codex' / 'config.toml'
 
 def _am(home=None) -> Path:
-    return _ae(home) / '.aider.conf.yml'
+    return _af(home) / '.claude' / 'settings.json'
 
 def _an(home=None) -> Path:
-    return _ae(home) / '.cline' / 'data' / 'settings' / 'providers.json'
+    return _af(home) / '.aider.conf.yml'
 
 def _ao(home=None) -> Path:
-    return _an(home).parent / 'models.json'
+    return _af(home) / '.cline' / 'data' / 'settings' / 'providers.json'
 
 def _ap(home=None) -> Path:
-    return _ae(home) / '.cline'
+    return _ao(home).parent / 'models.json'
 
-def _aq(home=None, config_path=None) -> list:
-    home = _ae(home)
-    config = _a5(config_path, home)
-    items = [{'id': 'opencode', 'title': 'OpenCode (этот конфиг)', 'path': config, 'kind': 'config', 'description': 'Записать профили в opencode.json — тот же файл читают OpenCode и расширения VS Code.'}, {'id': 'vscode', 'title': 'VS Code (чат-модели)', 'path': config, 'kind': 'config', 'description': 'Поставить расширение OpenCode LM и подключить его к этому же конфигу — профили появятся в пикере моделей VS Code.', 'extension': VSCODE_EXT_ID}, {'id': 'cline', 'title': 'Cline (VS Code, ~/.cline)', 'path': _an(home), 'kind': 'config', 'description': 'Прописать профили в providers.json Cline (openai-compatible) и models.json.'}, {'id': 'continue', 'title': 'Continue (.continue/config.yaml)', 'path': _aj(home), 'kind': 'config', 'description': 'Дописать модели как openai-совместимые провайдеры Continue.'}, {'id': 'codex', 'title': 'Codex CLI (~/.codex/config.toml)', 'path': _ak(home), 'kind': 'config', 'description': 'Добавить блоки [model_providers.*] и bearer-токены.'}, {'id': 'claude', 'title': 'Claude Code (~/.claude/settings.json)', 'path': _al(home), 'kind': 'config', 'description': 'Прописать ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_MODEL.'}, {'id': 'aider', 'title': 'Aider (~/.aider.conf.yml)', 'path': _am(home), 'kind': 'config', 'description': 'openai-api-base, openai-api-key и модель по умолчанию.'}]
+def _aq(home=None) -> Path:
+    return _af(home) / '.cline'
+
+def _ar(home=None, config_path=None) -> list:
+    home = _af(home)
+    config = _a6(config_path, home)
+    items = [{'id': 'opencode', 'title': 'OpenCode (этот конфиг)', 'path': config, 'kind': 'config', 'description': 'Записать профили в opencode.json — тот же файл читают OpenCode и расширения VS Code.'}, {'id': 'vscode', 'title': 'VS Code (чат-модели)', 'path': config, 'kind': 'config', 'description': 'Поставить расширение OpenCode LM и подключить его к этому же конфигу — профили появятся в пикере моделей VS Code.', 'extension': VSCODE_EXT_ID}, {'id': 'cline', 'title': 'Cline (VS Code, ~/.cline)', 'path': _ao(home), 'kind': 'config', 'description': 'Прописать профили в providers.json Cline (openai-compatible) и models.json.'}, {'id': 'continue', 'title': 'Continue (.continue/config.yaml)', 'path': _ak(home), 'kind': 'config', 'description': 'Дописать модели как openai-совместимые провайдеры Continue.'}, {'id': 'codex', 'title': 'Codex CLI (~/.codex/config.toml)', 'path': _al(home), 'kind': 'config', 'description': 'Добавить блоки [model_providers.*] и bearer-токены.'}, {'id': 'claude', 'title': 'Claude Code (~/.claude/settings.json)', 'path': _am(home), 'kind': 'config', 'description': 'Прописать ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_MODEL.'}, {'id': 'aider', 'title': 'Aider (~/.aider.conf.yml)', 'path': _an(home), 'kind': 'config', 'description': 'openai-api-base, openai-api-key и модель по умолчанию.'}]
     catalog = []
     for item in items:
         entry = dict(item)
         if entry['id'] == 'vscode':
-            entry['exists'] = _a8(home)
+            entry['exists'] = _a9(home)
         else:
             entry['exists'] = Path(entry['path']).exists()
         catalog.append(entry)
     return catalog
 
-def _ar(path: Path):
+def _as(path: Path):
     try:
         if not path.exists():
             return None
@@ -766,26 +816,26 @@ def _ar(path: Path):
     except Exception:
         return None
 
-def _as(path: Path, text: str):
+def _at(path: Path, text: str):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + '.tmp')
     tmp.write_text(text, encoding='utf-8', newline='\n')
     os.replace(tmp, path)
 
-def _at(path: Path) -> str:
+def _au(path: Path) -> str:
     try:
         return path.read_text(encoding='utf-8-sig')
     except FileNotFoundError:
         return ''
 
-def _au() -> bool:
+def _av() -> bool:
     try:
         import yaml
         return True
     except Exception:
         return False
 
-def _av(text: str) -> dict:
+def _aw(text: str) -> dict:
     if not text.strip():
         return {}
     try:
@@ -798,14 +848,14 @@ def _av(text: str) -> dict:
         return {}
     return data if isinstance(data, dict) else {}
 
-def _aw(data: dict) -> str:
+def _ax(data: dict) -> str:
     try:
         import yaml
         return yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=False)
     except Exception:
-        return _ax(data)
+        return _ay(data)
 
-def _ax(data: dict) -> str:
+def _ay(data: dict) -> str:
     lines = []
     for key, value in data.items():
         if isinstance(value, list):
@@ -831,23 +881,23 @@ def _ax(data: dict) -> str:
         lines.append('%s: %s' % (key, json.dumps(value, ensure_ascii=False)))
     return '\n'.join(lines) + '\n'
 
-def _ay(text: str, path: Path) -> dict:
+def _az(text: str, path: Path) -> dict:
     if not text.strip():
         return {}
-    if not _au():
+    if not _av():
         raise RuntimeError('нужен PyYAML, чтобы не затереть %s — установите: pip install pyyaml' % path)
-    data = _av(text)
+    data = _aw(text)
     if not data:
         raise RuntimeError('%s не разбирается как YAML — файл не тронут' % path)
     return data
 
-def _az(profiles, ids=None) -> list:
+def _a0(profiles, ids=None) -> list:
     if not ids:
         return [p for p in profiles if p.get('base_url')]
     wanted = set(ids)
     return [p for p in profiles if p.get('id') in wanted and p.get('base_url')]
 
-def _a0(profiles, default_model=''):
+def _a1(profiles, default_model=''):
     if not profiles:
         return None
     pid = _1(default_model)[0]
@@ -860,14 +910,14 @@ def _a0(profiles, default_model=''):
             return profile
     return profiles[0]
 
-def _a1(profile, default_model='') -> str:
+def _a2(profile, default_model='') -> str:
     models = list((profile or {}).get('models') or [])
     pid, mid = _1(default_model)
     if profile and pid == profile.get('id') and (mid in models):
         return mid
     return models[0] if models else ''
 
-def _a2(package: str, base_url: str='') -> str:
+def _a3(package: str, base_url: str='') -> str:
     package = (package or '').lower()
     if 'anthropic' in package:
         return 'anthropic'
@@ -877,44 +927,44 @@ def _a2(package: str, base_url: str='') -> str:
         return 'openai'
     return 'openai'
 
-def _a3(pid: str) -> str:
+def _a4(pid: str) -> str:
     safe = re.sub('[^A-Za-z0-9]+', '_', str(pid)).strip('_').upper() or 'PROVIDER'
     return 'OPENCODE_%s_API_KEY' % safe
 
-def _a4(value) -> str:
+def _a5(value) -> str:
     return json.dumps(str(value), ensure_ascii=False)
 
-def _a5(config_path, home=None) -> Path:
+def _a6(config_path, home=None) -> Path:
     if config_path:
         return Path(config_path)
     if home is not None:
-        return _ae(home) / '.config' / 'opencode' / 'opencode.json'
+        return _af(home) / '.config' / 'opencode' / 'opencode.json'
     return _j()
 
-def _a6(profiles, default_model, config_path=None, home=None):
-    path = Path(config_path) if config_path else _a5(None, home)
+def _a7(profiles, default_model, config_path=None, home=None):
+    path = Path(config_path) if config_path else _a6(None, home)
     config = _l(path)
-    new_config = _6(config, profiles)
+    new_config = _7(config, profiles)
     ref = (default_model or '').strip()
     if ref and ref != '(не задана)':
         new_config['model'] = ref
     backup = _q(path, new_config)
-    return {'agent': 'opencode', 'title': 'OpenCode (этот конфиг)', 'ok': True, 'path': path, 'backup': backup, 'message': 'Записано профилей: %d' % len(profiles)}
+    return {'agent': 'opencode', 'title': 'OpenCode (этот конфиг)', 'ok': True, 'path': path, 'backup': backup, 'message': 'Записано профилей: %d (остальные не тронуты)' % len(profiles)}
 VSCODE_EXT_ID = 'local.opencode-lm'
 
-def _a7(home=None):
-    base = _ah(home)
+def _a8(home=None):
+    base = _ai(home)
     try:
         dirs = sorted((p for p in base.glob(VSCODE_EXT_ID + '-*') if p.is_dir()))
     except Exception:
         return None
     return dirs[-1] if dirs else None
 
-def _a8(home=None) -> bool:
-    return _a7(home) is not None
+def _a9(home=None) -> bool:
+    return _a8(home) is not None
 
-def _a9(home=None):
-    src = _ai(home)
+def _ba(home=None):
+    src = _aj(home)
     for pattern in ('*.vsix', 'extension/*.vsix'):
         try:
             found = sorted(src.glob(pattern))
@@ -924,7 +974,7 @@ def _a9(home=None):
             return found[-1]
     return None
 
-def _ba(home=None):
+def _bb(home=None):
     roots = []
     local = os.environ.get('LOCALAPPDATA')
     if local and (not home):
@@ -951,7 +1001,7 @@ def _ba(home=None):
             candidates.append(('cmd', cmd))
     return candidates
 
-def _bb(kind, cli_path, vsix, extensions_dir):
+def _bc(kind, cli_path, vsix, extensions_dir):
     import subprocess
     if kind == 'node':
         cmd = ['node', str(cli_path)]
@@ -966,7 +1016,7 @@ def _bb(kind, cli_path, vsix, extensions_dir):
     ok = proc.returncode == 0 and re.search('successfully installed|already installed', out, re.I)
     return (bool(ok), out)
 
-def _bc(ext_dir: Path, extensions_json: Path, version: str):
+def _bd(ext_dir: Path, extensions_json: Path, version: str):
     entries = []
     if extensions_json.exists() and extensions_json.stat().st_size > 0:
         try:
@@ -982,11 +1032,11 @@ def _bc(ext_dir: Path, extensions_json: Path, version: str):
     uri = '/' + str(ext_dir.resolve()).replace('\\', '/').lstrip('/')
     entries.append({'identifier': {'id': VSCODE_EXT_ID, 'uuid': '8f3c1c2e-4a55-4c07-9d3b-3f0a6d5e7b21'}, 'version': version, 'location': {'$mid': 1, 'path': uri, 'scheme': 'file'}, 'relativeLocation': ext_dir.name, 'metadata': {'source': 'vsix', 'installedTimestamp': int(datetime.now().timestamp() * 1000), 'pinned': False, 'updated': True, 'private': True, 'isPreReleaseVersion': False, 'preRelease': False}})
     extensions_json.parent.mkdir(parents=True, exist_ok=True)
-    _as(extensions_json, json.dumps(entries, ensure_ascii=False, separators=(',', ':')))
+    _at(extensions_json, json.dumps(entries, ensure_ascii=False, separators=(',', ':')))
 
-def _bd(vsix: Path, home=None):
+def _be(vsix: Path, home=None):
     import zipfile
-    extensions_dir = _ah(home)
+    extensions_dir = _ai(home)
     extensions_dir.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(vsix) as zf:
         names = zf.namelist()
@@ -1008,32 +1058,32 @@ def _bd(vsix: Path, home=None):
                 shutil.copyfileobj(src, out)
         if 'extension.vsixmanifest' in names:
             (target / '.vsixmanifest').write_bytes(zf.read('extension.vsixmanifest'))
-    _bc(target, extensions_dir / 'extensions.json', version)
+    _bd(target, extensions_dir / 'extensions.json', version)
     return target
 
-def _be(home=None) -> str:
-    if _a8(home):
-        found = _a7(home)
+def _bf(home=None) -> str:
+    if _a9(home):
+        found = _a8(home)
         return 'Расширение уже установлено: %s' % found.name
-    vsix = _a9(home)
+    vsix = _ba(home)
     if vsix is None:
-        return 'Расширение не установлено и .vsix не найден — положите opencode-lm-*.vsix в %s' % _ai(home)
-    extensions_dir = _ah(home)
-    for kind, cli in _ba(home):
-        ok, out = _bb(kind, cli, vsix, extensions_dir)
-        if ok and _a8(home):
+        return 'Расширение не установлено и .vsix не найден — положите opencode-lm-*.vsix в %s' % _aj(home)
+    extensions_dir = _ai(home)
+    for kind, cli in _bb(home):
+        ok, out = _bc(kind, cli, vsix, extensions_dir)
+        if ok and _a9(home):
             return 'Расширение установлено через CLI: %s' % vsix.name
     try:
-        target = _bd(vsix, home)
+        target = _be(vsix, home)
     except Exception as exc:
         return 'Не удалось установить расширение: %s' % exc
     return 'Расширение установлено: %s' % target.name
 
-def _bf(settings_path: Path, config_path) -> str:
-    text = _at(settings_path)
+def _bg(settings_path: Path, config_path) -> str:
+    text = _au(settings_path)
     if not text.strip():
         data = {'opencodeLM.configPath': str(config_path)}
-        _as(settings_path, json.dumps(data, indent=2, ensure_ascii=False) + '\n')
+        _at(settings_path, json.dumps(data, indent=2, ensure_ascii=False) + '\n')
         return 'settings.json создан'
     try:
         data = json.loads(text)
@@ -1051,31 +1101,31 @@ def _bf(settings_path: Path, config_path) -> str:
             return 'settings.json без открывающей скобки — пропущен'
         line = '\n    "opencodeLM.configPath": %s,' % json.dumps(str(config_path), ensure_ascii=False)
         patched = text[:insert_at + 1] + line + text[insert_at + 1:]
-        _ar(settings_path)
-        _as(settings_path, patched)
+        _as(settings_path)
+        _at(settings_path, patched)
         return 'opencodeLM.configPath = %s (комментарии сохранены)' % config_path
     if not isinstance(data, dict):
         return 'settings.json не является объектом — пропущен'
     if config_path and data.get('opencodeLM.configPath') != str(config_path):
         data['opencodeLM.configPath'] = str(config_path)
-        _ar(settings_path)
-        _as(settings_path, json.dumps(data, indent=2, ensure_ascii=False) + '\n')
+        _as(settings_path)
+        _at(settings_path, json.dumps(data, indent=2, ensure_ascii=False) + '\n')
         return 'opencodeLM.configPath = %s' % config_path
     return 'opencodeLM.configPath уже указывает на конфиг'
 
-def _bg(profiles, default_model, config_path=None, home=None):
-    config = _a5(config_path, home)
-    notes = [_be(home)]
+def _bh(profiles, default_model, config_path=None, home=None):
+    config = _a6(config_path, home)
+    notes = [_bf(home)]
     try:
-        notes.append(_bf(_ag(home), config))
+        notes.append(_bg(_ah(home), config))
     except Exception as exc:
         notes.append('settings.json не изменён: %s' % exc)
     notes.append('Профили берутся из %s' % config)
     return {'agent': 'vscode', 'title': 'VS Code (чат-модели)', 'ok': True, 'path': config, 'backup': None, 'message': '; '.join(notes)}
 
-def _bh(profiles, default_model, home=None):
-    path = _an(home)
-    text = _at(path)
+def _bi(profiles, default_model, home=None):
+    path = _ao(home)
+    text = _au(path)
     try:
         data = json.loads(text) if text.strip() else {}
     except json.JSONDecodeError:
@@ -1092,7 +1142,7 @@ def _bh(profiles, default_model, home=None):
     now = datetime.now().astimezone().isoformat(timespec='milliseconds').replace('+00:00', 'Z')
     for profile in profiles:
         pid = str(profile.get('id') or '')
-        settings = {'provider': 'openai-compatible', 'apiKey': profile.get('api_key') or '', 'model': _a1(profile, default_model), 'baseUrl': profile.get('base_url'), 'headers': {}, 'reasoning': {'enabled': False}}
+        settings = {'provider': 'openai-compatible', 'apiKey': profile.get('api_key') or '', 'model': _a2(profile, default_model), 'baseUrl': profile.get('base_url'), 'headers': {}, 'reasoning': {'enabled': False}}
         previous = providers.get(pid) if isinstance(providers.get(pid), dict) else {}
         entry = dict(previous)
         entry['settings'] = settings
@@ -1100,15 +1150,15 @@ def _bh(profiles, default_model, home=None):
         entry['tokenSource'] = 'manual'
         providers[pid] = entry
     data['providers'] = providers
-    primary = _a0(profiles, default_model)
+    primary = _a1(profiles, default_model)
     if primary is not None:
         data['lastUsedProvider'] = str(primary.get('id'))
     data.setdefault('modes', {})
-    _ar(path)
-    _as(path, json.dumps(data, indent=2, ensure_ascii=False) + '\n')
-    models_path = _ao(home)
+    _as(path)
+    _at(path, json.dumps(data, indent=2, ensure_ascii=False) + '\n')
+    models_path = _ap(home)
     try:
-        models_doc = json.loads(_at(models_path) or '{}')
+        models_doc = json.loads(_au(models_path) or '{}')
     except Exception:
         models_doc = {}
     if not isinstance(models_doc, dict):
@@ -1128,14 +1178,14 @@ def _bh(profiles, default_model, home=None):
         entry['models'] = known
         per_provider[pid] = entry
     models_doc['providers'] = per_provider
-    _ar(models_path)
-    _as(models_path, json.dumps(models_doc, indent=2, ensure_ascii=False) + '\n')
+    _as(models_path)
+    _at(models_path, json.dumps(models_doc, indent=2, ensure_ascii=False) + '\n')
     count = sum((len(p.get('models') or []) for p in profiles))
     return {'agent': 'cline', 'title': 'Cline', 'ok': True, 'path': path, 'backup': None, 'message': 'Провайдеров: %d, моделей: %d' % (len(profiles), count)}
 
-def _bi(profiles, default_model, home=None):
-    path = _aj(home)
-    doc = _ay(_at(path), path)
+def _bj(profiles, default_model, home=None):
+    path = _ak(home)
+    doc = _az(_au(path), path)
     if not doc:
         doc = {'name': 'Local Config', 'version': '1.0.0', 'schema': 'v1'}
     old = doc.get('models')
@@ -1147,16 +1197,16 @@ def _bi(profiles, default_model, home=None):
     kept = [m for m in models if not is_ours(m)]
     added = 0
     for profile in profiles:
-        kind = _a2(profile.get('package'), profile.get('base_url'))
+        kind = _a3(profile.get('package'), profile.get('base_url'))
         for mid in profile.get('models') or []:
             kept.append({'name': '%s · %s' % (profile.get('display_name') or profile.get('id'), mid), 'provider': kind, 'model': mid, 'apiBase': profile.get('base_url'), 'apiKey': profile.get('api_key') or '', 'roles': list(CONTINUE_ROLES)})
             added += 1
     doc['models'] = kept
-    _ar(path)
-    _as(path, _aw(doc))
+    _as(path)
+    _at(path, _ax(doc))
     return {'agent': 'continue', 'title': 'Continue', 'ok': True, 'path': path, 'backup': None, 'message': 'Моделей добавлено: %d, всего: %d' % (added, len(kept))}
 
-def _bj(text: str) -> tuple:
+def _bk(text: str) -> tuple:
     lines = text.splitlines()
     split = len(lines)
     for idx, line in enumerate(lines):
@@ -1165,8 +1215,8 @@ def _bj(text: str) -> tuple:
             break
     return (lines[:split], lines[split:])
 
-def _bk(text: str, values: dict) -> str:
-    head, body = _bj(text)
+def _bl(text: str, values: dict) -> str:
+    head, body = _bk(text)
     keep = []
     for line in head:
         stripped = line.strip()
@@ -1175,13 +1225,13 @@ def _bk(text: str, values: dict) -> str:
         keep.append(line)
     while keep and (not keep[0].strip()):
         keep.pop(0)
-    prefix = ['%s = %s' % (key, _a4(value)) for key, value in values.items()]
+    prefix = ['%s = %s' % (key, _a5(value)) for key, value in values.items()]
     result = prefix + keep
     if body:
         result = result + [''] + body
     return '\n'.join(result).strip('\n') + '\n'
 
-def _bl(text: str, headers) -> str:
+def _bm(text: str, headers) -> str:
     lines = text.splitlines()
     out = []
     skipping = False
@@ -1200,37 +1250,37 @@ def _bl(text: str, headers) -> str:
         out.pop()
     return '\n'.join(out)
 
-def _bm(profiles, default_model, home=None):
-    path = _ak(home)
-    text = _at(path)
+def _bn(profiles, default_model, home=None):
+    path = _al(home)
+    text = _au(path)
     headers = {'[model_providers.%s]' % p.get('id') for p in profiles}
-    body = _bl(text, headers)
+    body = _bm(text, headers)
     blocks = []
     for profile in profiles:
         pid = str(profile.get('id') or '')
         blocks.append('[model_providers.%s]' % pid)
-        blocks.append('name = %s' % _a4(profile.get('display_name') or pid))
-        blocks.append('base_url = %s' % _a4(profile.get('base_url')))
+        blocks.append('name = %s' % _a5(profile.get('display_name') or pid))
+        blocks.append('base_url = %s' % _a5(profile.get('base_url')))
         blocks.append('wire_api = "chat"')
-        blocks.append('env_key = %s' % _a4(_a3(pid)))
+        blocks.append('env_key = %s' % _a5(_a4(pid)))
         if profile.get('api_key'):
-            blocks.append('experimental_bearer_token = %s' % _a4(profile['api_key']))
+            blocks.append('experimental_bearer_token = %s' % _a5(profile['api_key']))
         blocks.append('')
     merged = (body.rstrip() + '\n\n' + '\n'.join(blocks)).strip('\n') + '\n'
-    primary = _a0(profiles, default_model)
+    primary = _a1(profiles, default_model)
     if primary is not None:
-        model = _a1(primary, default_model)
+        model = _a2(primary, default_model)
         values = {'model_provider': primary.get('id')}
         if model:
             values['model'] = model
-        merged = _bk(merged, values)
-    _ar(path)
-    _as(path, merged)
+        merged = _bl(merged, values)
+    _as(path)
+    _at(path, merged)
     return {'agent': 'codex', 'title': 'Codex CLI', 'ok': True, 'path': path, 'backup': None, 'message': 'Провайдеров записано: %d' % len(profiles)}
 
-def _bn(profiles, default_model, home=None):
-    path = _al(home)
-    text = _at(path)
+def _bo(profiles, default_model, home=None):
+    path = _am(home)
+    text = _au(path)
     try:
         data = json.loads(text) if text.strip() else {}
     except json.JSONDecodeError:
@@ -1240,7 +1290,7 @@ def _bn(profiles, default_model, home=None):
             raise RuntimeError('settings.json не разбирается: %s' % exc)
     if not isinstance(data, dict):
         raise RuntimeError('settings.json не является объектом JSON')
-    primary = _a0(profiles, default_model)
+    primary = _a1(profiles, default_model)
     if primary is None:
         raise RuntimeError('нет профилей с baseURL')
     env = data.get('env') if isinstance(data.get('env'), dict) else {}
@@ -1248,35 +1298,35 @@ def _bn(profiles, default_model, home=None):
     if primary.get('api_key'):
         env['ANTHROPIC_AUTH_TOKEN'] = primary['api_key']
         env['ANTHROPIC_API_KEY'] = primary['api_key']
-    model = _a1(primary, default_model)
+    model = _a2(primary, default_model)
     if model:
         env['ANTHROPIC_MODEL'] = model
     data['env'] = env
-    _ar(path)
-    _as(path, json.dumps(data, indent=2, ensure_ascii=False) + '\n')
+    _as(path)
+    _at(path, json.dumps(data, indent=2, ensure_ascii=False) + '\n')
     return {'agent': 'claude', 'title': 'Claude Code', 'ok': True, 'path': path, 'backup': None, 'message': '%s → %s' % (primary.get('id'), model or '(модель не задана)')}
 
-def _bo(profiles, default_model, home=None):
-    path = _am(home)
-    doc = _ay(_at(path), path)
-    primary = _a0(profiles, default_model)
+def _bp(profiles, default_model, home=None):
+    path = _an(home)
+    doc = _az(_au(path), path)
+    primary = _a1(profiles, default_model)
     if primary is None:
         raise RuntimeError('нет профилей с baseURL')
-    model = _a1(primary, default_model)
+    model = _a2(primary, default_model)
     doc['openai-api-base'] = primary.get('base_url')
     if primary.get('api_key'):
         doc['openai-api-key'] = primary['api_key']
     if model:
         doc['model'] = 'openai/%s' % model
-    _ar(path)
-    _as(path, _aw(doc))
+    _as(path)
+    _at(path, _ax(doc))
     return {'agent': 'aider', 'title': 'Aider', 'ok': True, 'path': path, 'backup': None, 'message': '%s → %s' % (primary.get('id'), model or '(модель не задана)')}
-TRANSFER_WRITERS = {'opencode': _a6, 'vscode': _bg, 'cline': _bh, 'continue': _bi, 'codex': _bm, 'claude': _bn, 'aider': _bo}
+TRANSFER_WRITERS = {'opencode': _a7, 'vscode': _bh, 'cline': _bi, 'continue': _bj, 'codex': _bn, 'claude': _bo, 'aider': _bp}
 
-def _bp(profiles, default_model='', agent_ids=None, home=None, config_path=None):
+def _bq(profiles, default_model='', agent_ids=None, home=None, config_path=None):
     selected = [a for a in agent_ids or [] if a in TRANSFER_WRITERS]
     selected.sort(key=lambda a: AGENT_IDS.index(a) if a in AGENT_IDS else 99)
-    targets = _az(profiles)
+    targets = _a0(profiles)
     results = []
     if not targets:
         return [{'agent': '—', 'title': '—', 'ok': False, 'path': None, 'message': 'нет профилей с baseURL'}]
@@ -1294,7 +1344,7 @@ def _bp(profiles, default_model='', agent_ids=None, home=None, config_path=None)
         results.append(result)
     return results
 
-class _bq(tk.Toplevel):
+class _br(tk.Toplevel):
 
     def __init__(self, app, profile):
         super().__init__(app.root)
@@ -1512,7 +1562,7 @@ class _bq(tk.Toplevel):
             text = self._display_for(mid)
             if text != mid:
                 text = '%s   (%s)' % (text, mid)
-            cb = _bt(self.inner, self, self.model_vars[mid], text)
+            cb = _bu(self.inner, self, self.model_vars[mid], text)
             cb.var = self.model_vars[mid]
             cb.pack(anchor='w', padx=8, pady=1, fill='x')
         if shown == 0:
@@ -1647,7 +1697,7 @@ class _bq(tk.Toplevel):
         self.result = None
         self.destroy()
 
-class _br(tk.Toplevel):
+class _bs(tk.Toplevel):
 
     def __init__(self, app):
         super().__init__(app.root)
@@ -1750,10 +1800,10 @@ class _br(tk.Toplevel):
         self.app.quick_restore(entry)
         self.reload()
 
-class _bs:
+class _bt:
     pass
 
-class _bt(tk.Checkbutton):
+class _bu(tk.Checkbutton):
 
     def __init__(self, master, owner, variable, text, **kw):
         kw.setdefault('bg', _c.bg_panel)
@@ -1803,39 +1853,39 @@ CONTROL_KEYCODES = {'paste': (VK_V,), 'copy': (VK_C, VK_INSERT), 'cut': (VK_X,),
 LATIN_SHORTCUT_KEYSYMS = {'paste': ('v', 'V'), 'copy': ('c', 'C'), 'cut': ('x', 'X'), 'select_all': ('a', 'A')}
 INPUT_CLASSES = ('TEntry', 'TCombobox', 'TSpinbox', 'Entry', 'Spinbox', 'Text')
 
-def _bu(widget):
+def _bv(widget):
     try:
         return widget.winfo_class() in INPUT_CLASSES
     except Exception:
         return False
 
-def _bv(event, name):
+def _bw(event, name):
     try:
         return int(getattr(event, name, 0) or 0)
     except Exception:
         return 0
 
-def _bw(event):
-    return _bv(event, 'state')
-
 def _bx(event):
-    return _bv(event, 'keycode')
+    return _bw(event, 'state')
 
 def _by(event):
-    return str(getattr(event, 'keysym', '') or '')
+    return _bw(event, 'keycode')
 
 def _bz(event):
+    return str(getattr(event, 'keysym', '') or '')
+
+def _b0(event):
     if event is None:
         return None
-    if not _bw(event) & CONTROL_STATE:
+    if not _bx(event) & CONTROL_STATE:
         return None
-    keycode = _bx(event)
+    keycode = _by(event)
     for action, codes in CONTROL_KEYCODES.items():
         if keycode in codes:
             return action
     return None
 
-class _b0:
+class _b1:
 
     def __init__(self, root):
         self.root = root
@@ -1850,7 +1900,7 @@ class _b0:
 
     def _widget(self, event):
         w = event.widget
-        return w if _bu(w) else None
+        return w if _bv(w) else None
 
     def bind(self, widget):
         widget.bind('<Button-3>', self.popup, add='+')
@@ -1858,20 +1908,20 @@ class _b0:
 
     def bind_tree(self, widget):
         self.bind(widget)
-        if _bu(widget):
+        if _bv(widget):
             widget.bind('<Control-KeyPress>', self.on_control_key, add='+')
         for child in widget.winfo_children():
             self.bind_tree(child)
 
     def _target_for(self, event=None):
         widget = getattr(event, 'widget', None) if event is not None else None
-        if _bu(widget):
+        if _bv(widget):
             return widget
         try:
             widget = self.root.focus_get()
         except Exception:
             widget = None
-        return widget if _bu(widget) else None
+        return widget if _bv(widget) else None
 
     def _run_shortcut(self, widget, action):
         virtual = SHORTCUT_EVENTS[action]
@@ -1884,10 +1934,10 @@ class _b0:
         return 'break'
 
     def on_control_key(self, event):
-        action = _bz(event)
+        action = _b0(event)
         if action is None:
             return None
-        if _by(event) in LATIN_SHORTCUT_KEYSYMS[action]:
+        if _bz(event) in LATIN_SHORTCUT_KEYSYMS[action]:
             return None
         return self._run_shortcut(self._target_for(event), action)
 
@@ -1980,8 +2030,8 @@ class _b0:
             self.menu.grab_release()
         return 'break'
 
-def _b1(root):
-    menu = _b0(root)
+def _b2(root):
+    menu = _b1(root)
     for klass in INPUT_CLASSES:
         try:
             root.bind_class(klass, '<Control-KeyPress>', menu.on_control_key, add='+')
@@ -1989,7 +2039,7 @@ def _b1(root):
             pass
     return menu
 
-class _b2:
+class _b3:
     WM_APP = 32768
     WM_TRAYICON = WM_APP + 20
     WM_LBUTTONUP = 514
@@ -2182,7 +2232,7 @@ class _b2:
         menu.add_separator()
         menu.add_command(label='НАСТРОЙКИ AOS…', command=self.app.open_aos_settings)
         menu.add_separator()
-        auto = _cn()
+        auto = _co()
         menu.add_command(label=('✓ ' if auto else '   ') + 'АВТОЗАГРУЗКА В ТРЕЕ', command=self._toggle_autostart)
         menu.add_separator()
         menu.add_command(label='ЗАКРЫТЬ ПРИЛОЖЕНИЕ', command=self.app.quit_app)
@@ -2194,8 +2244,8 @@ class _b2:
         self._menu = menu
 
     def _toggle_autostart(self):
-        target = not _cn()
-        ok = _co(target)
+        target = not _co()
+        ok = _cp(target)
         if not ok:
             try:
                 messagebox.showerror('Автозагрузка', 'Не удалось изменить параметр автозагрузки.', parent=self.app.root)
@@ -2215,10 +2265,10 @@ class _b2:
         if aos.win is not None and aos.win.winfo_exists():
             aos.hide()
             aos.settings['enabled'] = False
-            _cf(aos.settings)
+            _cg(aos.settings)
         else:
             aos.settings['enabled'] = True
-            _cf(aos.settings)
+            _cg(aos.settings)
             aos.show()
         self.app._refresh_aos_button()
 
@@ -2258,7 +2308,7 @@ class _b2:
             pass
         self._added = False
 
-def _ca():
+def _cb():
     candidates = []
     try:
         if getattr(sys, 'frozen', False):
@@ -2285,7 +2335,7 @@ WS_EX_TRANSPARENT = 32
 WS_EX_TOOLWINDOW = 128
 WS_EX_NOACTIVATE = 134217728
 
-def _cb(hwnd, enabled: bool) -> bool:
+def _cc(hwnd, enabled: bool) -> bool:
     try:
         import ctypes
         from ctypes import wintypes
@@ -2344,7 +2394,7 @@ def _cb(hwnd, enabled: bool) -> bool:
     except Exception:
         return False
 
-def _cc(tk_window):
+def _cd(tk_window):
     try:
         import ctypes
         tk_window.update_idletasks()
@@ -2357,11 +2407,11 @@ def _cc(tk_window):
 AOS_POSITIONS = [('top-left', 'СВЕРХУ СЛЕВА'), ('top-center', 'СВЕРХУ ЦЕНТР'), ('top-right', 'СВЕРХУ СПРАВА'), ('mid-left', 'СЛЕВА ЦЕНТР'), ('mid-right', 'СПРАВА ЦЕНТР'), ('bottom-left', 'СНИЗУ СЛЕВА'), ('bottom-center', 'СНИЗУ ЦЕНТР'), ('bottom-right', 'СНИЗУ СПРАВА')]
 AOS_PRESETS = {'compact': 'КОМПАКТНЫЙ', 'normal': 'ОБЫЧНЫЙ', 'wide': 'ШИРОКИЙ'}
 
-def _cd() -> Path:
+def _ce() -> Path:
     return _b() / 'aos.json'
 
-def _ce() -> dict:
-    path = _cd()
+def _cf() -> dict:
+    path = _ce()
     defaults = {'enabled': False, 'position': 'top-right', 'preset': 'normal', 'opacity': 0.92, 'offset_x': 18, 'offset_y': 18, 'refresh_sec': 60, 'show_profile': True, 'show_coefficient': True, 'click_through': True, 'always_visible': False, 'profiles': []}
     try:
         if path.exists():
@@ -2372,19 +2422,19 @@ def _ce() -> dict:
         pass
     return defaults
 
-def _cf(settings: dict) -> None:
-    path = _cd()
+def _cg(settings: dict) -> None:
+    path = _ce()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(settings, indent=2, ensure_ascii=False), encoding='utf-8')
     except Exception:
         pass
 
-class _b9:
+class _ca:
 
     def __init__(self, app):
         self.app = app
-        self.settings = _ce()
+        self.settings = _cf()
         self.win = None
         self._after_id = None
         self._drag = {'x': 0, 'y': 0}
@@ -2398,7 +2448,7 @@ class _b9:
         if enabled is None:
             enabled = not self.enabled
         self.settings['enabled'] = bool(enabled)
-        _cf(self.settings)
+        _cg(self.settings)
         if enabled:
             self.show()
         else:
@@ -2553,20 +2603,20 @@ class _b9:
     def apply_click_through(self, enabled=None):
         if enabled is not None:
             self.settings['click_through'] = bool(enabled)
-            _cf(self.settings)
+            _cg(self.settings)
         if self.win is None or not self.win.winfo_exists():
             return False
-        hwnd = _cc(self.win)
+        hwnd = _cd(self.win)
         if not hwnd:
             return False
-        ok = _cb(hwnd, self.click_through)
+        ok = _cc(hwnd, self.click_through)
         try:
             import ctypes
             from ctypes import wintypes
             user32 = ctypes.windll.user32
             parent = int(user32.GetParent(wintypes.HWND(hwnd)) or 0)
             if parent:
-                _cb(parent, self.click_through)
+                _cc(parent, self.click_through)
         except Exception:
             pass
         try:
@@ -2672,18 +2722,18 @@ class _b9:
             self.settings['manual_x'] = self.win.winfo_x()
             self.settings['manual_y'] = self.win.winfo_y()
             self.settings['position'] = 'manual'
-            _cf(self.settings)
+            _cg(self.settings)
         except Exception:
             pass
 
     def set_position(self, key):
         self.settings['position'] = key
-        _cf(self.settings)
+        _cg(self.settings)
         self.apply_position()
 
     def set_preset(self, key):
         self.settings['preset'] = key
-        _cf(self.settings)
+        _cg(self.settings)
         if self.win is not None and self.win.winfo_exists():
             self._build_content(self.win)
             self.apply_position()
@@ -2813,7 +2863,7 @@ class _b9:
 
     def set_profiles(self, ids):
         self.settings['profiles'] = list(ids)
-        _cf(self.settings)
+        _cg(self.settings)
         if self.win is not None and self.win.winfo_exists():
             self._build_content(self.win)
             self.apply_position()
@@ -2844,9 +2894,9 @@ class _b9:
         want_through = self.click_through and (not alt_down)
         if want_through != getattr(self, '_through_active', None):
             self._through_active = want_through
-            hwnd = _cc(self.win)
+            hwnd = _cd(self.win)
             if hwnd:
-                _cb(hwnd, want_through)
+                _cc(hwnd, want_through)
         try:
             self._alt_after = self.win.after(150, self._poll_alt)
         except Exception:
@@ -2864,7 +2914,7 @@ class _b9:
         sec = max(60, int(self.settings.get('refresh_sec', 60)))
         if immediate:
             try:
-                self.app.request_balance(silent=True)
+                self.app.request_balance(silent=True, force=True)
             except Exception:
                 pass
         try:
@@ -2876,7 +2926,10 @@ class _b9:
         self._after_id = None
         self._schedule_refresh(immediate=True)
 
-def _ca():
+    def restart_timer(self):
+        self._schedule_refresh(immediate=True)
+
+def _cb():
     candidates = []
     try:
         if getattr(sys, 'frozen', False):
@@ -2903,7 +2956,7 @@ WS_EX_TRANSPARENT = 32
 WS_EX_TOOLWINDOW = 128
 WS_EX_NOACTIVATE = 134217728
 
-def _cb(hwnd, enabled: bool) -> bool:
+def _cc(hwnd, enabled: bool) -> bool:
     try:
         import ctypes
         from ctypes import wintypes
@@ -2962,7 +3015,7 @@ def _cb(hwnd, enabled: bool) -> bool:
     except Exception:
         return False
 
-def _cc(tk_window):
+def _cd(tk_window):
     try:
         import ctypes
         tk_window.update_idletasks()
@@ -2975,11 +3028,11 @@ def _cc(tk_window):
 AOS_POSITIONS = [('top-left', 'СВЕРХУ СЛЕВА'), ('top-center', 'СВЕРХУ ЦЕНТР'), ('top-right', 'СВЕРХУ СПРАВА'), ('mid-left', 'СЛЕВА ЦЕНТР'), ('mid-right', 'СПРАВА ЦЕНТР'), ('bottom-left', 'СНИЗУ СЛЕВА'), ('bottom-center', 'СНИЗУ ЦЕНТР'), ('bottom-right', 'СНИЗУ СПРАВА')]
 AOS_PRESETS = {'compact': 'КОМПАКТНЫЙ', 'normal': 'ОБЫЧНЫЙ', 'wide': 'ШИРОКИЙ'}
 
-def _cd() -> Path:
+def _ce() -> Path:
     return _b() / 'aos.json'
 
-def _ce() -> dict:
-    path = _cd()
+def _cf() -> dict:
+    path = _ce()
     defaults = {'enabled': False, 'position': 'top-right', 'preset': 'normal', 'opacity': 0.92, 'offset_x': 18, 'offset_y': 18, 'refresh_sec': 60, 'show_profile': True, 'show_coefficient': True, 'click_through': True, 'always_visible': False, 'profiles': []}
     try:
         if path.exists():
@@ -2990,15 +3043,15 @@ def _ce() -> dict:
         pass
     return defaults
 
-def _cf(settings: dict) -> None:
-    path = _cd()
+def _cg(settings: dict) -> None:
+    path = _ce()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(settings, indent=2, ensure_ascii=False), encoding='utf-8')
     except Exception:
         pass
 
-class _cg(tk.Toplevel):
+class _ch(tk.Toplevel):
 
     def __init__(self, app, aos):
         super().__init__(app.root)
@@ -3166,6 +3219,7 @@ class _cg(tk.Toplevel):
         s = self.aos.settings
         prev_preset = s.get('preset')
         prev_profiles = list(s.get('profiles') or [])
+        prev_refresh = s.get('refresh_sec')
         s['preset'] = self.var_preset.get()
         s['opacity'] = round(float(self.var_opacity.get()), 2)
         s['refresh_sec'] = max(60, int(self.var_refresh.get()))
@@ -3174,7 +3228,7 @@ class _cg(tk.Toplevel):
         s['click_through'] = bool(self.var_click.get())
         selected = self._read_profiles_selection()
         s['profiles'] = selected
-        _cf(s)
+        _cg(s)
         if self.aos.win is None or not self.aos.win.winfo_exists():
             return
         self.aos.set_opacity(s['opacity'])
@@ -3193,6 +3247,11 @@ class _cg(tk.Toplevel):
                 pass
         self.aos.refresh()
         self.aos.apply_click_through()
+        if prev_refresh != s.get('refresh_sec'):
+            try:
+                self.aos.restart_timer()
+            except Exception:
+                pass
         if prev_preset != s['preset']:
             self.aos._build_content(self.aos.win)
             self.aos.apply_position()
@@ -3204,7 +3263,7 @@ class _cg(tk.Toplevel):
         self.app._refresh_aos_button()
         self.destroy()
 
-class _ch(tk.Toplevel):
+class _ci(tk.Toplevel):
 
     def __init__(self, app, home=None):
         super().__init__(app.root)
@@ -3215,7 +3274,7 @@ class _ch(tk.Toplevel):
         self.configure(bg=_c.bg)
         self.transient(app.root)
         self.grab_set()
-        saved = _ac()
+        saved = _ad()
         saved_agents = [a for a in saved.get('agents') or [] if a in AGENT_IDS]
         saved_profiles = list(saved.get('profiles') or [])
         self.agent_vars = {}
@@ -3224,7 +3283,7 @@ class _ch(tk.Toplevel):
         self.var_profile_filter.trace_add('write', lambda *a: self._render_profiles())
         self._result = None
         self.home = home
-        self.catalog = _aq(home=self.home, config_path=str(app.config_path))
+        self.catalog = _ar(home=self.home, config_path=str(app.config_path))
         for item in self.catalog:
             self.agent_vars[item['id']] = tk.BooleanVar(master=self, value=item['id'] in saved_agents)
         for profile in app.profiles:
@@ -3411,14 +3470,14 @@ class _ch(tk.Toplevel):
         if not profiles:
             messagebox.showinfo('Перенос', 'Отметьте хотя бы один профиль', parent=self)
             return
-        _ad({'agents': agents, 'profiles': [p['id'] for p in profiles]})
+        _ae({'agents': agents, 'profiles': [p['id'] for p in profiles]})
         if dry_run:
             lines = ['Проверка (файлы не изменяются):']
             for agent in agents:
                 item = next((c for c in self.catalog if c['id'] == agent), None)
                 where = item['path'] if item else '—'
                 if agent == 'vscode':
-                    lines.append('  • %s → расширение %s + %s' % (item['title'] if item else agent, VSCODE_EXT_ID, _ag(self.home)))
+                    lines.append('  • %s → расширение %s + %s' % (item['title'] if item else agent, VSCODE_EXT_ID, _ah(self.home)))
                 else:
                     lines.append('  • %s → %s' % (agent, where))
             lines.append('Профилей: %d' % len(profiles))
@@ -3426,7 +3485,7 @@ class _ch(tk.Toplevel):
             return
         self.btn_import.configure(state='disabled')
         try:
-            results = _bp(profiles, self.app.var_default_model.get(), agents, home=self.home, config_path=self.app.config_path)
+            results = _bq(profiles, self.app.var_default_model.get(), agents, home=self.home, config_path=self.app.config_path)
         finally:
             try:
                 self.btn_import.configure(state='normal')
@@ -3474,17 +3533,17 @@ class App:
         self._build_root()
         self.load()
         try:
-            self.aos = _b9(self)
+            self.aos = _ca(self)
             if self.aos.enabled:
                 self.root.after(600, self.aos.show)
         except Exception:
             self.aos = None
         try:
-            self.tray = _b2(self, icon_path=_ca())
+            self.tray = _b3(self, icon_path=_cb())
             self.root.after(400, self._install_tray)
         except Exception:
             self.tray = None
-        if _cp():
+        if _cq():
             try:
                 self.root.withdraw()
             except Exception:
@@ -3497,7 +3556,7 @@ class App:
         self.root.minsize(1010, 640)
         self.root.configure(bg=_c.bg)
         _d(self.root)
-        self.clipboard = _b1(self.root)
+        self.clipboard = _b2(self.root)
         self._build()
         try:
             self.clipboard.bind_tree(self.root)
@@ -3744,7 +3803,7 @@ class App:
         self.lst_models.delete(0, 'end')
 
     def add_profile(self):
-        dlg = _bq(self, None)
+        dlg = _br(self, None)
         self.root.wait_window(dlg)
         res = dlg.result
         if not res:
@@ -3764,7 +3823,7 @@ class App:
         profile = self._find(self.selected)
         if not profile:
             return
-        dlg = _bq(self, profile)
+        dlg = _br(self, profile)
         self.root.wait_window(dlg)
         res = dlg.result
         if not res:
@@ -4094,7 +4153,7 @@ class App:
     def _aos(self):
         if getattr(self, 'aos', None) is None:
             try:
-                self.aos = _b9(self)
+                self.aos = _ca(self)
             except Exception:
                 self.aos = None
         return self.aos
@@ -4139,7 +4198,7 @@ class App:
         except Exception:
             pass
         try:
-            dlg = _cg(self, aos)
+            dlg = _ch(self, aos)
             try:
                 dlg.deiconify()
                 dlg.lift()
@@ -4169,7 +4228,7 @@ class App:
             info.configure(text='Снимков: %d  •  последний: %s' % (len(self._history), last))
 
     def open_history(self):
-        _br(self)
+        _bs(self)
 
     def snapshot_now(self, reason=''):
         try:
@@ -4235,7 +4294,7 @@ class App:
         if not self.profiles:
             messagebox.showinfo('Экспорт профилей', 'Список профилей пуст — нечего сохранять', parent=self.root)
             return
-        data = _8(self.profiles, self.var_default_model.get())
+        data = _9(self.profiles, self.var_default_model.get())
         default_dir = str(Path.home() / 'Downloads')
         name = filedialog.asksaveasfilename(parent=self.root, title='Экспорт всех профилей моделей', defaultextension='.json', initialdir=default_dir if Path(default_dir).is_dir() else str(Path.home()), initialfile='opencode-profiles.json', filetypes=[('JSON файлы', '*.json'), ('Все файлы', '*.*')])
         if not name:
@@ -4273,7 +4332,7 @@ class App:
             messagebox.showerror('Импорт', 'Не удалось прочитать файл:\n%s\n\n%s' % (src, exc), parent=self.root)
             return
         try:
-            imported, default_model = _aa(raw)
+            imported, default_model = _ab(raw)
         except ValueError as exc:
             messagebox.showerror('Импорт', '%s\n\nФайл: %s' % (exc, src), parent=self.root)
             return
@@ -4301,13 +4360,13 @@ class App:
         if not self.profiles:
             messagebox.showinfo('Перенос в агентов', 'Список профилей пуст — сначала добавьте профиль', parent=self.root)
             return
-        dlg = _ch(self)
+        dlg = _ci(self)
         self.root.wait_window(dlg)
 
     def run(self):
         self.root.mainloop()
 
-def _ci(module: str) -> bool:
+def _cj(module: str) -> bool:
     try:
         __import__(module)
         return True
@@ -4316,7 +4375,7 @@ def _ci(module: str) -> bool:
 REQUIRED = {'certifi': ('certifi', 'актуальные корневые сертификаты для TLS')}
 OPTIONAL = {'PIL': ('Pillow', 'запасной захват экрана диагностики')}
 
-def _cj(pkg: str) -> tuple[bool, str]:
+def _ck(pkg: str) -> tuple[bool, str]:
     import subprocess
     try:
         proc = subprocess.run([sys.executable, '-m', 'pip', 'install', '--user', '--upgrade', '--quiet', pkg], capture_output=True, text=True, timeout=240)
@@ -4327,17 +4386,17 @@ def _cj(pkg: str) -> tuple[bool, str]:
     except Exception as exc:
         return (False, str(exc))
 
-def _ck() -> list:
+def _cl() -> list:
     notes = []
-    if not _ci('tkinter'):
+    if not _cj('tkinter'):
         return ['tkinter не найден — переустановите Python с компонентом Tcl/Tk']
     needed = []
     for module, (pkg, why) in REQUIRED.items():
-        if not _ci(module):
+        if not _cj(module):
             needed.append((pkg, why))
     if getattr(sys, 'frozen', False):
         needed = []
-    if needed and (not _ci('pip')):
+    if needed and (not _cj('pip')):
         if getattr(sys, 'frozen', False):
             return notes
         try:
@@ -4345,19 +4404,19 @@ def _ck() -> list:
             ensurepip.bootstrap()
         except Exception:
             pass
-    if needed and (not _ci('pip')):
+    if needed and (not _cj('pip')):
         notes.append('pip недоступен — автодогрузка невозможна (python -m ensurepip)')
         return notes
     for pkg, why in needed:
         notes.append('Догружаю %s — %s…' % (pkg, why))
-        ok, err = _cj(pkg)
-        if ok and _ci(pkg):
+        ok, err = _ck(pkg)
+        if ok and _cj(pkg):
             notes.append('%s установлен' % pkg)
         else:
             notes.append('%s не установился: %s' % (pkg, err or 'неизвестная ошибка'))
     return notes
 
-def _cl():
+def _cm():
     if os.name != 'nt':
         return
     try:
@@ -4371,7 +4430,7 @@ def _cl():
 _AUTOSTART_KEY = 'Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run'
 _AUTOSTART_NAME = 'AgentManager'
 
-def _cm():
+def _cn():
     if getattr(sys, 'frozen', False):
         return '"%s" --tray' % sys.executable
     script = Path(__file__).resolve()
@@ -4379,7 +4438,7 @@ def _cm():
     exe = pyw if pyw.exists() else Path(sys.executable)
     return '"%s" "%s" --tray' % (exe, script)
 
-def _cn() -> bool:
+def _co() -> bool:
     try:
         import winreg
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _AUTOSTART_KEY) as key:
@@ -4388,12 +4447,12 @@ def _cn() -> bool:
     except Exception:
         return False
 
-def _co(enabled: bool) -> bool:
+def _cp(enabled: bool) -> bool:
     try:
         import winreg
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _AUTOSTART_KEY, 0, winreg.KEY_SET_VALUE) as key:
             if enabled:
-                winreg.SetValueEx(key, _AUTOSTART_NAME, 0, winreg.REG_SZ, _cm())
+                winreg.SetValueEx(key, _AUTOSTART_NAME, 0, winreg.REG_SZ, _cn())
             else:
                 try:
                     winreg.DeleteValue(key, _AUTOSTART_NAME)
@@ -4403,7 +4462,7 @@ def _co(enabled: bool) -> bool:
     except Exception:
         return False
 
-def _cp() -> bool:
+def _cq() -> bool:
     try:
         return '--tray' in sys.argv
     except Exception:
@@ -4412,7 +4471,7 @@ _SINGLE_INSTANCE_HANDLE = None
 _MUTEX_NAME = 'Global\\AgentManager.SingleInstance'
 _FIND_WINDOW_TITLE = APP_TITLE
 
-def _cq():
+def _cr():
     global _SINGLE_INSTANCE_HANDLE
     try:
         import ctypes
@@ -4433,7 +4492,7 @@ def _cq():
     except Exception:
         return True
 
-def _cr():
+def _cs():
     try:
         import ctypes
         from ctypes import wintypes
@@ -4450,7 +4509,7 @@ def _cr():
     except Exception:
         return False
 
-def _cs():
+def _ct():
     try:
         import ctypes
         ctypes.windll.user32.MessageBoxW(None, 'Agent Manager уже запущен.\n\nОкно существующего экземпляра сейчас будет развернуто.', APP_TITLE, 64)
@@ -4458,12 +4517,12 @@ def _cs():
         pass
 
 def main():
-    _cl()
-    if not _cq():
-        if not _cr():
-            _cs()
+    _cm()
+    if not _cr():
+        if not _cs():
+            _ct()
         return 0
-    notes = _ck()
+    notes = _cl()
     app = App()
     if notes:
         app._set_status('  •  '.join(notes))
