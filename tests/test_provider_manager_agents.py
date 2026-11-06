@@ -523,6 +523,10 @@ def test_agents_dialog_dry_run_writes_nothing(manager, tk_root, tmp_path, monkey
 
     report = dlg.txt_report.get("1.0", "end")
     assert "файлы не изменяются" in report
+    # у VS Code в пустом домашнем каталоге нет .vsix — отчёт обязан это показать
+    assert "OK" in report
+    assert "ВНИМАНИЕ" in report
+    assert "Требуют внимания" in report
     assert not (tmp_path / ".continue" / "config.yaml").exists()
     assert not (tmp_path / ".aider.conf.yml").exists()
     dlg.destroy()
