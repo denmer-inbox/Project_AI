@@ -133,7 +133,7 @@ db28b62 feat: индикатор ● как глиф, автозагрузка �
 
 ```
 OK  OpenCode (этот конфиг)          провайдеров 4 → 4; моделей 50 → 50
-OK  VS Code (чат-модели)            расширение уже установлено; пропишет путь
+OK  VS Code (чат-модели)            расширение уже установлено; пропишет путь к конфигу OpenCode
 OK  Cline (VS Code, ~/.cline)       провайдеров сейчас: 6
 OK  Continue (.continue/config.yaml) YAML разбирается
 OK  Codex CLI (~/.codex/config.toml) блоки [model_providers.*] будут дописаны
@@ -142,7 +142,7 @@ OK  Aider (~/.aider.conf.yml)        YAML разбирается
 OK  DeepSeek Harness (~/.dsh)        патч-записей: 15
 
 профилей: 4, моделей: 50
-требуют внимания: 0 из 8
+Требуют внимания: 0 из 8
 ```
 
 Единственный отсутствующий файл — `~/.claude/settings.json`
