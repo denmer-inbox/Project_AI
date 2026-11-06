@@ -2052,10 +2052,9 @@ def transfer_plan(profiles, default_model="", agent_ids=None, home=None,
                     ok = False
                     notes.append("settings.json не разбирается — будет пропущен")
                 elif isinstance(data, dict) and data.get("opencodeLM.configPath") == str(cfg):
-                    notes.append("путь к конфигу уже прописан")
+                    notes.append("путь к конфигу OpenCode уже прописан")
                 else:
-                    notes.append("пропишет путь к конфигу")
-                path = cfg
+                    notes.append("пропишет путь к конфигу OpenCode")
             elif agent == "dsh":
                 path = dsh_patch_path(home)
                 if path.exists():
