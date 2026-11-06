@@ -1,7 +1,8 @@
-# Передача контекста: Agent Manager / OpenCode Provider Manager
+# Передача контекста: OpenCode Provider Manager
 
 Дата: 06.11.2026. Репозиторий: `C:\Users\nickd\Downloads\Project_AI`
-Ветка: `master`, коммит `f5957ee`, синхронизирован с `origin/master`, дерево чистое.
+Ветка: `master`. База — коммит `9c32255`; поверх него не закоммичены
+доработки из раздела 3.4 (DeepSeek Harness + предпросмотр отчёта).
 
 ---
 
@@ -52,6 +53,7 @@ db28b62 feat: индикатор ● как глиф, автозагрузка �
 | Codex CLI | `~/.codex/config.toml` |
 | Claude Code | `~/.claude/settings.json` |
 | Aider | `~/.aider.conf.yml` |
+| DeepSeek Harness | `~/.dsh/profiles/desktop/cordis.patch.yml` + `~/.dsh/.credentials.yaml` |
 
 Ключевая функция — `merge_profiles_into_config()`: дописывает выбранные профили,
 **не трогая** остальных провайдеров, их модели, `mcp`, `agent`, `skills`, `$schema`.
@@ -80,32 +82,70 @@ db28b62 feat: индикатор ● как глиф, автозагрузка �
 5. **Кнопка не вставлялась** — проверка «уже есть» находила текст подсказки
    внутри диалога. Теперь проверка по `command=self.open_agents_dialog`.
 
+### 3.4 Добавлено в этом сеансе
+
+**DeepSeek Harness (`~/.dsh`) как восьмой агент.**
+
+- `dsh_profile_dir()`, `dsh_patch_path()`, `dsh_credentials_path()`.
+- `_transfer_dsh()`: в `cordis.patch.yml` точечно заменяется/добавляется
+  элемент списка с `id: llm-pi-ai` (имя `@deepseek-ai/dsh-llm-pi-ai`), внутри —
+  `config.providers.<id>`. Остальные патч-записи и существующие провайдеры
+  сохраняются. Ключи дописываются в `.credentials.yaml` →
+  `refs.DEEPSEEK_<ID>_API_KEY`, прочие refs не трогаются.
+- `_require_yaml_any()` / `_dump_yaml_any()` — корень `cordis.patch.yml` это
+  YAML-**список**, старый `_require_yaml` умел только словари.
+- `AGENT_IDS` и `agent_catalog()` дополнены `dsh`.
+
+**Предпросмотр отчёта — `transfer_plan()`.**
+
+Сухой прогон, ноль записей. Для каждого агента проверяет то, что реально может
+сломаться: дельта моделей OpenCode (`провайдеров N → M`, `моделей X → Y`,
+предупреждение если моделей станет меньше), разбираемость `settings.json` /
+`providers.json`, установлено ли расширение VS Code и есть ли `.vsix`,
+корректность YAML Continue/Aider, состояние `cordis.patch.yml`. Кнопка
+«ТОЛЬКО ОТЧЁТ (ПРОВЕРКА)» печатает метки `OK` / `ВНИМАНИЕ` и итог
+«требуют внимания: N из 8».
+
+**Проверки этого сеанса:**
+
+- 61 тест проходит (36 в `_agents.py`, включая 10 новых на dsh и предпросмотр).
+- Перенос в dsh на **копии** реального `cordis.patch.yml`: 15 блоков → 15,
+  провайдеры `deepseek-4-flash` / `-funpay-csharponame` / `-v4-flash` целы,
+  ключей 4 → 5, оригинал не изменён.
+- Предпросмотр на реальном `opencode.json`: 4 профиля, 50 моделей,
+  0 из 8 требуют внимания; файл после прогона байт-в-байт тот же.
+- Пересобраны оба exe, onefile запущен — окно «OpenCode — менеджер
+  провайдеров» и трей на месте; хеши `opencode.json`, `cordis.patch.yml`,
+  `.credentials.yaml` до/после совпали.
+
 ---
 
 ## 4. Проверено и работает
 
-- 50 тестов проходят (`tests/test_provider_manager_agents.py`,
+- 61 тест проходит (`tests/test_provider_manager_agents.py`,
   `_export.py`, `_paste.py`).
 - Кнопка «ОБНОВИТЬ» — 1 запрос на нажатие (как в исходной версии).
-- Реальный перенос во все 7 агентов в изолированном каталоге: все OK,
+- Реальный перенос во все 8 агентов в изолированном каталоге: все OK,
   конфиг цел, повторный прогон ничего не ломает.
 - В запущенном exe: кнопка есть, окно открывается, «ТОЛЬКО ОТЧЁТ» выдаёт
-  отчёт (7 агентов, 4 профиля).
-- Отчёт пользователя (подтверждён вживую):
+  отчёт (8 агентов, 4 профиля).
+- Отчёт живого предпросмотра на реальном конфиге:
 
 ```
-Проверка (файлы не изменяются):
-  • opencode → C:\Users\nickd\.config\opencode\opencode.json
-  • VS Code (чат-модели) → расширение local.opencode-lm + ...\Code\User\settings.json
-  • cline → C:\Users\nickd\.cline\data\settings\providers.json
-  • continue → C:\Users\nickd\.continue\config.yaml
-  • codex → C:\Users\nickd\.codex\config.toml
-  • claude → C:\Users\nickd\.claude\settings.json
-  • aider → C:\Users\nickd\.aider.conf.yml
-Профилей: 4
+OK  OpenCode (этот конфиг)          провайдеров 4 → 4; моделей 50 → 50
+OK  VS Code (чат-модели)            расширение уже установлено; пропишет путь
+OK  Cline (VS Code, ~/.cline)       провайдеров сейчас: 6
+OK  Continue (.continue/config.yaml) YAML разбирается
+OK  Codex CLI (~/.codex/config.toml) блоки [model_providers.*] будут дописаны
+OK  Claude Code (~/.claude/settings.json) settings.json будет создан
+OK  Aider (~/.aider.conf.yml)        YAML разбирается
+OK  DeepSeek Harness (~/.dsh)        патч-записей: 15
+
+профилей: 4, моделей: 50
+требуют внимания: 0 из 8
 ```
 
-Все пути реальные. Единственный отсутствующий файл — `~/.claude/settings.json`
+Единственный отсутствующий файл — `~/.claude/settings.json`
 (создастся при переносе в Claude Code).
 
 ---
@@ -129,7 +169,8 @@ SHA-256 (первые 16): `E473D1F95E032EE0`, 16299 байт.
 
 1. **Реальный перенос пользователем ещё не выполнялся** — только сухой прогон.
    Следующий шаг: отметить агентов и профили → «ИМПОРТ В АГЕНТОВ» → проверить,
-   что цифры/файлы появились.
+   что цифры/файлы появились. Для dsh это запишет в живой `~/.dsh`; бэкапы
+   `<файл>.bak-<дата>` создаются автоматически, откат — копированием обратно.
 2. **Claude Code**: файла `~/.claude/settings.json` пока нет — проверить, что
    создаётся корректно (env: `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`,
    `ANTHROPIC_MODEL`).
@@ -140,6 +181,13 @@ SHA-256 (первые 16): `E473D1F95E032EE0`, 16299 байт.
    и heredoc `<<'EOF'` — писать скрипты в `.py`-файлы, а не однострочниками.
 5. `.gitignore` игнорирует `*.spec`, поэтому `OpenCodeProviderManager.spec` и
    `OCM-onefile.spec` в git НЕ лежат — при клоне их надо воссоздавать.
+6. **Python на машине три, и `python` из PATH — не тот**: `python` →
+   3.15 без PyYAML (сборка конфигов падает), рабочий — 
+   `C:\Users\nickd\AppData\Local\Python\pythoncore-3.14-64\python.exe`
+   (3.14.5 + PyYAML 6.0.3 + tkinter). Тесты и PyInstaller запускать им.
+7. **Подмена `APPDATA` ломает PyYAML** (пропадает user-site) — тесты на
+   бэкапы начинают падать с «нужен PyYAML». Это корректная защита от затирания,
+   не баг: подменяйте только `LOCALAPPDATA`, а `APPDATA` не трогайте.
 
 ---
 
@@ -153,5 +201,33 @@ SHA-256 (первые 16): `E473D1F95E032EE0`, 16299 байт.
   **Никогда** не писать в реальный `~/.config/opencode/opencode.json`.
 - Не кликать мышью по живому окну во время проверок: один такой клик уже
   изменил `model` в рабочем конфиге (восстановлено).
-- После правок: пересчитать обфускацию (`agent_manager`/`opencode_provider_manager.obfuscated.py`),
-  пересобрать обе сборки, запустить exe, сверить хеш конфига до/после.
+- После правок: пересобрать обе сборки, запустить exe, сверить хеши
+  `~/.config/opencode/opencode.json`, `~/.dsh/profiles/desktop/cordis.patch.yml`
+  и `~/.dsh/.credentials.yaml` до/после — должны совпасть.
+
+## 8. Обфускация — ОТМЕНЕНА
+
+Собираем из `opencode_provider_manager.py` напрямую, обфускатор не используется.
+Оба спека (`OpenCodeProviderManager.spec`, `OCM-onefile.spec`) указывают на
+исходник:
+
+```
+a = Analysis(['opencode_provider_manager.py'], ...)
+```
+
+Файл `opencode_provider_manager.obfuscated.py` остаётся в репозитории как
+исторический артефакт, но в сборке не участвует — не редактировать его и не
+пересобирать.
+
+Почему отказались: старый обфускатор переименовывал методы классов, из-за чего
+ломались вызовы вида `app.run()` (`'_6t' object has no attribute 'run'`).
+Чтобы не повторять, обфускация убрана из процесса сборки полностью.
+
+Команды сборки:
+
+```
+C:\Users\nickd\AppData\Local\Python\pythoncore-3.14-64\python.exe -m PyInstaller OCM-onefile.spec --noconfirm --distpath dist --workpath build\onefile
+C:\Users\nickd\AppData\Local\Python\pythoncore-3.14-64\python.exe -m PyInstaller OpenCodeProviderManager.spec --noconfirm --distpath dist --workpath build\onedir
+```
+
+Сначала onefile (его запускает ярлык), потом onedir.

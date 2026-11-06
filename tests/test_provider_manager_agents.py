@@ -43,7 +43,8 @@ def test_catalog_lists_all_supported_agents(manager, tmp_path):
     catalog = manager.agent_catalog(home=tmp_path)
     ids = [item["id"] for item in catalog]
 
-    assert ids == ["opencode", "vscode", "cline", "continue", "codex", "claude", "aider"]
+    assert ids == ["opencode", "vscode", "cline", "continue", "codex", "claude",
+                   "aider", "dsh"]
     for item in catalog:
         assert item["path"]
         assert item["description"]
@@ -559,3 +560,175 @@ def test_agents_dialog_requires_selection(manager, tk_root, tmp_path, monkeypatc
 
     assert shown and "агента" in shown[0]
     dlg.destroy()
+
+
+# --- DeepSeek Harness -----------------------------------------------------
+
+def test_transfer_to_dsh_writes_providers_and_keys(manager, tmp_path):
+    results = manager.transfer_profiles(
+        [_profile("alpha", ["a1", "a2"], key="sk-test-1")], "", ["dsh"],
+        home=tmp_path)
+
+    assert [r["ok"] for r in results] == [True]
+    patch = tmp_path / ".dsh" / "profiles" / "desktop" / "cordis.patch.yml"
+    assert patch.is_file()
+
+    yaml = pytest.importorskip("yaml")
+    doc = yaml.safe_load(patch.read_text(encoding="utf-8"))
+    assert isinstance(doc, list)
+    block = next(e for e in doc if e.get("id") == "llm-pi-ai")
+    providers = block["config"]["providers"]
+    assert "alpha" in providers
+    entry = providers["alpha"]
+    assert entry["api"] == "openai-completions"
+    assert entry["baseURL"] == "https://alpha.example/v1"
+    assert entry["apiKeyEnv"] == "DEEPSEEK_ALPHA_API_KEY"
+    assert [m["id"] for m in entry["models"]] == ["a1", "a2"]
+
+    creds = yaml.safe_load(
+        (tmp_path / ".dsh" / ".credentials.yaml").read_text(encoding="utf-8"))
+    assert creds["refs"]["DEEPSEEK_ALPHA_API_KEY"] == "sk-test-1"
+
+
+def test_transfer_to_dsh_keeps_existing_patches_and_providers(manager, tmp_path):
+    patch = tmp_path / ".dsh" / "profiles" / "desktop" / "cordis.patch.yml"
+    patch.parent.mkdir(parents=True)
+    patch.write_text(
+        "- id: ui-theme\n"
+        "  name: \"@deepseek-ai/dsh-client-ui-theme\"\n"
+        "  config:\n"
+        "    preference: dark\n"
+        "- id: llm-pi-ai\n"
+        "  name: \"@deepseek-ai/dsh-llm-pi-ai\"\n"
+        "  config:\n"
+        "    providers:\n"
+        "      keeper:\n"
+        "        displayName: Keeper\n"
+        "        apiKeyEnv: KEEPER_KEY\n"
+        "        api: openai-completions\n"
+        "        baseURL: https://keeper.example/v1\n"
+        "        models:\n"
+        "          - id: k1\n",
+        encoding="utf-8")
+
+    manager.transfer_profiles([_profile("alpha", ["a1"])], "", ["dsh"],
+                              home=tmp_path)
+
+    yaml = pytest.importorskip("yaml")
+    doc = yaml.safe_load(patch.read_text(encoding="utf-8"))
+    assert [e["id"] for e in doc] == ["ui-theme", "llm-pi-ai"]
+    providers = doc[1]["config"]["providers"]
+    assert sorted(providers) == ["alpha", "keeper"]
+    assert providers["keeper"]["displayName"] == "Keeper"
+
+
+def test_transfer_to_dsh_keeps_other_credentials(manager, tmp_path):
+    cred = tmp_path / ".dsh" / ".credentials.yaml"
+    cred.parent.mkdir(parents=True)
+    cred.write_text(
+        "version: 1\n"
+        "refs:\n"
+        "  EXISTING_KEY: keep-me\n",
+        encoding="utf-8")
+
+    manager.transfer_profiles([_profile("alpha", ["a1"], key="new-key")], "",
+                              ["dsh"], home=tmp_path)
+
+    yaml = pytest.importorskip("yaml")
+    doc = yaml.safe_load(cred.read_text(encoding="utf-8"))
+    assert doc["version"] == 1
+    assert doc["refs"]["EXISTING_KEY"] == "keep-me"
+    assert doc["refs"]["DEEPSEEK_ALPHA_API_KEY"] == "new-key"
+
+
+def test_transfer_to_dsh_is_idempotent(manager, tmp_path):
+    first = manager.transfer_profiles([_profile("alpha", ["a1"])], "", ["dsh"],
+                                      home=tmp_path)
+    second = manager.transfer_profiles([_profile("alpha", ["a1"])], "", ["dsh"],
+                                       home=tmp_path)
+
+    assert [r["ok"] for r in (first + second)] == [True, True]
+    yaml = pytest.importorskip("yaml")
+    doc = yaml.safe_load(
+        (tmp_path / ".dsh" / "profiles" / "desktop" / "cordis.patch.yml")
+        .read_text(encoding="utf-8"))
+    blocks = [e for e in doc if e.get("id") == "llm-pi-ai"]
+    assert len(blocks) == 1
+    assert len(blocks[0]["config"]["providers"]) == 1
+
+
+def test_transfer_to_dsh_backup_created(manager, tmp_path):
+    patch = tmp_path / ".dsh" / "profiles" / "desktop" / "cordis.patch.yml"
+    patch.parent.mkdir(parents=True)
+    patch.write_text("- id: ui-theme\n  config:\n    preference: dark\n",
+                     encoding="utf-8")
+
+    manager.transfer_profiles([_profile("alpha", ["a1"])], "", ["dsh"],
+                              home=tmp_path)
+
+    backups = list(patch.parent.glob("cordis.patch.yml.bak-*"))
+    assert len(backups) == 1
+
+
+# --- предпросмотр (сухой прогон) ------------------------------------------
+
+def test_transfer_plan_counts_models(manager, tmp_path):
+    config = tmp_path / "opencode.json"
+    config.write_text(json.dumps({
+        "providers": {
+            "big": {"name": "Big", "package": manager.PACKAGES[0],
+                    "settings": {"baseURL": "https://big.example/v1"},
+                    "models": {"m1": {"name": "m1"}, "m2": {"name": "m2"}}},
+        }
+    }), encoding="utf-8")
+
+    plan = manager.transfer_plan(
+        [_profile("alpha", ["a1", "a2"])], "", ["opencode"],
+        home=tmp_path, config_path=str(config))
+
+    assert len(plan) == 1
+    assert plan[0]["ok"] is True
+    message = plan[0]["message"]
+    assert "провайдеров 1 → 2" in message
+    assert "моделей 2 → 4" in message
+    assert "новые: alpha" in message
+
+
+def test_transfer_plan_writes_nothing(manager, tmp_path):
+    config = tmp_path / "opencode.json"
+    config.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+    before = config.read_text(encoding="utf-8")
+
+    manager.transfer_plan([_profile("alpha", ["a1"])], "", list(manager.AGENT_IDS),
+                          home=tmp_path, config_path=str(config))
+
+    assert config.read_text(encoding="utf-8") == before
+    assert not (tmp_path / ".continue" / "config.yaml").exists()
+    assert not (tmp_path / ".aider.conf.yml").exists()
+    assert not (tmp_path / ".dsh" / "profiles").exists()
+
+
+def test_transfer_plan_reports_broken_target(manager, tmp_path):
+    cline = tmp_path / ".cline" / "data" / "settings" / "providers.json"
+    cline.parent.mkdir(parents=True)
+    cline.write_text("{ это не json", encoding="utf-8")
+
+    plan = manager.transfer_plan([_profile("alpha", ["a1"])], "", ["cline"],
+                                 home=tmp_path)
+
+    assert len(plan) == 1
+    assert plan[0]["ok"] is False
+    assert "не разбирается" in plan[0]["message"]
+
+
+def test_transfer_plan_marks_missing_vsix(manager, tmp_path):
+    plan = manager.transfer_plan([_profile("alpha", ["a1"])], "", ["vscode"],
+                                 home=tmp_path)
+    assert plan[0]["ok"] is False
+    assert ".vsix" in plan[0]["message"]
+
+
+def test_transfer_plan_reports_missing_profiles(manager, tmp_path):
+    plan = manager.transfer_plan([], "", ["aider"], home=tmp_path)
+    assert plan[0]["ok"] is False
+    assert "профил" in plan[0]["message"]

@@ -904,7 +904,7 @@ def profiles_from_export(data) -> tuple:
 # opencode-lm читает тот же opencode.json), Cline, Continue, Codex CLI,
 # Claude Code, Aider. Ручная правка конфигов не нужна.
 
-AGENT_IDS = ("opencode", "vscode", "cline", "continue", "codex", "claude", "aider")
+AGENT_IDS = ("opencode", "vscode", "cline", "continue", "codex", "claude", "aider", "dsh")
 
 AGENTS_FILE_NAME = "agents.json"
 
@@ -1064,6 +1064,21 @@ def cline_dir(home=None) -> Path:
     return _home_dir(home) / ".cline"
 
 
+def dsh_profile_dir(home=None) -> Path:
+    """Каталог профиля DeepSeek Harness (dsh)."""
+    return _home_dir(home) / ".dsh" / "profiles" / "desktop"
+
+
+def dsh_patch_path(home=None) -> Path:
+    """Патч-слой, где лежат провайдеры: cordis.patch.yml."""
+    return dsh_profile_dir(home) / "cordis.patch.yml"
+
+
+def dsh_credentials_path(home=None) -> Path:
+    """Сюда dsh пишет API-ключи (refs.<ENV_NAME>)."""
+    return _home_dir(home) / ".dsh" / ".credentials.yaml"
+
+
 def agent_catalog(home=None, config_path=None) -> list:
     """Список ИИ-агентов для диалога переноса (порядок = AGENT_IDS)."""
     home = _home_dir(home)
@@ -1118,6 +1133,13 @@ def agent_catalog(home=None, config_path=None) -> list:
             "path": aider_config_path(home),
             "kind": "config",
             "description": "openai-api-base, openai-api-key и модель по умолчанию.",
+        },
+        {
+            "id": "dsh",
+            "title": "DeepSeek Harness (~/.dsh)",
+            "path": dsh_patch_path(home),
+            "kind": "config",
+            "description": "Провайдеры в cordis.patch.yml (llm-pi-ai) и ключи в .credentials.yaml.",
         },
     ]
     catalog = []
@@ -1239,6 +1261,40 @@ def _require_yaml(text: str, path: Path) -> dict:
     if not data:
         raise RuntimeError("%s не разбирается как YAML — файл не тронут" % path)
     return data
+
+
+def _require_yaml_any(text: str, path: Path, default):
+    """Разбор YAML, где корень может быть списком (cordis.patch.yml).
+
+    default — что вернуть для пустого/отсутствующего файла.
+    """
+    if not text.strip():
+        return default
+    if not _yaml_available():
+        raise RuntimeError(
+            "нужен PyYAML, чтобы не затереть %s — установите: pip install pyyaml" % path)
+    try:
+        import yaml
+        data = yaml.safe_load(text)
+    except Exception as exc:
+        raise RuntimeError("%s не разбирается как YAML: %s" % (path, exc))
+    if data is None:
+        return default
+    if not isinstance(data, (dict, list)):
+        raise RuntimeError("%s: неожиданный корень YAML — файл не тронут" % path)
+    return data
+
+
+def _dump_yaml_any(data) -> str:
+    """YAML для словаря ИЛИ списка (списком является cordis.patch.yml)."""
+    try:
+        import yaml
+        return yaml.safe_dump(data, allow_unicode=True, sort_keys=False,
+                              default_flow_style=False)
+    except Exception:
+        if isinstance(data, dict):
+            return _dump_minimal_yaml(data)
+        return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
 def _profiles_for_transfer(profiles, ids=None) -> list:
@@ -1788,6 +1844,115 @@ def _transfer_aider(profiles, default_model, home=None):
     }
 
 
+def _dsh_env_key(pid: str) -> str:
+    """Имя переменной с ключом в .credentials.yaml (refs.<NAME>)."""
+    safe = re.sub(r"[^A-Za-z0-9]+", "_", str(pid)).strip("_").upper() or "PROVIDER"
+    return "DEEPSEEK_%s_API_KEY" % safe
+
+
+def _dsh_replace_patch(doc, block_id, name, new_config):
+    """Заменяет (или добавляет) один патч-элемент по id, не трогая остальные."""
+    if not isinstance(doc, list):
+        doc = []
+    replaced = False
+    for entry in doc:
+        if isinstance(entry, dict) and entry.get("id") == block_id:
+            entry["name"] = name
+            entry["config"] = new_config
+            replaced = True
+            break
+    if not replaced:
+        doc.append({"id": block_id, "name": name, "config": new_config})
+    return doc
+
+
+def _dsh_provider_entry(profile, default_model):
+    """Провайдер в формате dsh llm-pi-ai."""
+    models = []
+    for mid in profile.get("models") or []:
+        spec = {"id": mid, "name": mid}
+        raw_models = ((profile.get("_raw") or {}).get("models") or {})
+        existing = raw_models.get(mid) if isinstance(raw_models, dict) else None
+        if isinstance(existing, dict):
+            name = existing.get("name")
+            if isinstance(name, str) and name.strip():
+                spec["name"] = name
+            caps = existing.get("capabilities") or {}
+            inputs = caps.get("input")
+            if isinstance(inputs, str):
+                inputs = inputs.split()
+            if isinstance(inputs, list) and inputs:
+                spec["input"] = [str(x) for x in inputs]
+            else:
+                spec["input"] = ["text"]
+            limit = existing.get("limit") or {}
+            if limit.get("context"):
+                spec["contextWindow"] = int(limit["context"])
+            if limit.get("output"):
+                spec["maxTokens"] = int(limit["output"])
+        spec.setdefault("input", ["text"])
+        models.append(spec)
+    entry = {
+        "displayName": profile.get("display_name") or profile.get("id"),
+        "apiKeyEnv": _dsh_env_key(profile.get("id")),
+        "api": "openai-completions",
+        "baseURL": profile.get("base_url"),
+        "models": models,
+    }
+    return entry
+
+
+def _transfer_dsh(profiles, default_model, home=None):
+    """DeepSeek Harness: провайдеры в cordis.patch.yml, ключи в .credentials.yaml."""
+    patch_path = dsh_patch_path(home)
+    patch_path.parent.mkdir(parents=True, exist_ok=True)
+    doc = _require_yaml_any(_read_text(patch_path), patch_path, [])
+
+    # текущий блок llm-pi-ai (если он уже есть) — дополняем, а не затираем
+    providers = {}
+    for entry in doc if isinstance(doc, list) else []:
+        if isinstance(entry, dict) and entry.get("id") == "llm-pi-ai":
+            cfg = entry.get("config") if isinstance(entry.get("config"), dict) else {}
+            existing = cfg.get("providers")
+            if isinstance(existing, dict):
+                providers = copy.deepcopy(existing)
+            break
+
+    for profile in profiles:
+        providers[str(profile["id"])] = _dsh_provider_entry(profile, default_model)
+
+    doc = _dsh_replace_patch(
+        doc, "llm-pi-ai", "@deepseek-ai/dsh-llm-pi-ai", {"providers": providers})
+
+    _backup_file(patch_path)
+    _atomic_write(patch_path, _dump_yaml_any(doc))
+
+    # ключи — в .credentials.yaml, в refs.<ENV>: значения не теряем
+    cred_path = dsh_credentials_path(home)
+    creds = _require_yaml_any(_read_text(cred_path), cred_path, {})
+    if not isinstance(creds, dict):
+        creds = {}
+    refs = creds.get("refs")
+    if not isinstance(refs, dict):
+        refs = {}
+    written = 0
+    for profile in profiles:
+        key = profile.get("api_key")
+        if key:
+            refs[_dsh_env_key(profile.get("id"))] = key
+            written += 1
+    if written:
+        creds["refs"] = refs
+        _backup_file(cred_path)
+        _atomic_write(cred_path, _dump_yaml_any(creds))
+
+    return {
+        "agent": "dsh", "title": "DeepSeek Harness", "ok": True,
+        "path": patch_path, "backup": None,
+        "message": "Провайдеров: %d, ключей: %d" % (len(providers), written),
+    }
+
+
 TRANSFER_WRITERS = {
     "opencode": _transfer_opencode,
     "vscode": _transfer_vscode,
@@ -1796,7 +1961,165 @@ TRANSFER_WRITERS = {
     "codex": _transfer_codex,
     "claude": _transfer_claude,
     "aider": _transfer_aider,
+    "dsh": _transfer_dsh,
 }
+
+
+def _read_json_lenient(path: Path):
+    """JSON/JSONC файл или None, если его нет или он не разбирается."""
+    try:
+        text = _read_text(path)
+        if not text.strip():
+            return None
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return json.loads(strip_jsonc(text))
+    except Exception:
+        return None
+
+
+def _count_models(providers) -> int:
+    if not isinstance(providers, dict):
+        return 0
+    total = 0
+    for value in providers.values():
+        models = (value or {}).get("models") if isinstance(value, dict) else None
+        if isinstance(models, dict):
+            total += len(models)
+        elif isinstance(models, list):
+            total += len(models)
+    return total
+
+
+def transfer_plan(profiles, default_model="", agent_ids=None, home=None,
+                  config_path=None):
+    """Сухой прогон: что произойдёт при переносе — без единой записи.
+
+    Проверяет только то, что реально может сломаться или удивить:
+      * сколько моделей станет в opencode.json (было → стало);
+      * разбирается ли целевой файл агента (иначе перенос откажется);
+      * есть ли уже расширение VS Code и куда указывает settings.json.
+
+    Возвращает список {agent, title, ok, path, message}, как transfer_profiles.
+    """
+    selected = [a for a in (agent_ids or []) if a in TRANSFER_WRITERS]
+    selected.sort(key=lambda a: AGENT_IDS.index(a) if a in AGENT_IDS else 99)
+    targets = _profiles_for_transfer(profiles)
+    if not targets:
+        return [{"agent": "—", "title": "—", "ok": False, "path": None,
+                 "message": "нет профилей с baseURL"}]
+
+    plan = []
+    for agent in selected:
+        title = agent
+        path = None
+        ok = True
+        notes = []
+        try:
+            if agent == "opencode":
+                path = Path(config_path) if config_path else _resolve_config_path(None, home)
+                if path.exists():
+                    before_doc = load_config(path)
+                else:
+                    before_doc = {}
+                before = _count_models(before_doc.get("providers"))
+                merged = merge_profiles_into_config(before_doc, targets)
+                after = _count_models(merged.get("providers"))
+                existing_ids = set((before_doc.get("providers") or {}))
+                new_ids = [p["id"] for p in targets if p["id"] not in existing_ids]
+                notes.append("провайдеров %d → %d" % (len(existing_ids),
+                                                      len(merged.get("providers") or {})))
+                notes.append("моделей %d → %d" % (before, after))
+                if new_ids:
+                    notes.append("новые: %s" % ", ".join(new_ids[:4]))
+                if after < before:
+                    ok = False
+                    notes.append("ВНИМАНИЕ: моделей станет меньше")
+            elif agent == "vscode":
+                path = vscode_settings_path(home)
+                cfg = _resolve_config_path(config_path, home)
+                installed = _vscode_extension_installed(home)
+                if installed:
+                    notes.append("расширение уже установлено")
+                elif find_vscode_vsix(home) is not None:
+                    notes.append("расширение будет установлено из .vsix")
+                else:
+                    ok = False
+                    notes.append("расширения нет и .vsix не найден — установка не удастся")
+                data = _read_json_lenient(path)
+                if path.exists() and data is None:
+                    ok = False
+                    notes.append("settings.json не разбирается — будет пропущен")
+                elif isinstance(data, dict) and data.get("opencodeLM.configPath") == str(cfg):
+                    notes.append("путь к конфигу уже прописан")
+                else:
+                    notes.append("пропишет путь к конфигу")
+                path = cfg
+            elif agent == "dsh":
+                path = dsh_patch_path(home)
+                if path.exists():
+                    doc = _require_yaml_any(_read_text(path), path, [])
+                    if not isinstance(doc, list):
+                        ok = False
+                        notes.append("cordis.patch.yml: корень не список")
+                    else:
+                        notes.append("патч-записей: %d" % len(doc))
+                else:
+                    notes.append("cordis.patch.yml будет создан")
+            elif agent in ("continue", "aider"):
+                path = (continue_config_path(home) if agent == "continue"
+                        else aider_config_path(home))
+                if path.exists():
+                    _require_yaml(_read_text(path), path)
+                    notes.append("YAML разбирается")
+                else:
+                    notes.append("файл будет создан")
+            elif agent == "cline":
+                path = cline_providers_path(home)
+                if path.exists():
+                    data = _read_json_lenient(path)
+                    if data is None:
+                        ok = False
+                        notes.append("providers.json не разбирается")
+                    else:
+                        notes.append("провайдеров сейчас: %d"
+                                     % len(data.get("providers") or {}))
+                else:
+                    notes.append("providers.json будет создан")
+            elif agent == "codex":
+                path = codex_config_path(home)
+                notes.append("блоки [model_providers.*] будут дописаны"
+                             if path.exists() else "config.toml будет создан")
+            elif agent == "claude":
+                path = claude_settings_path(home)
+                if path.exists():
+                    data = _read_json_lenient(path)
+                    if data is None:
+                        ok = False
+                        notes.append("settings.json не разбирается")
+                    else:
+                        notes.append("env будет дополнен")
+                else:
+                    notes.append("settings.json будет создан")
+        except Exception as exc:
+            ok = False
+            notes.append(str(exc))
+
+        for item in _agent_catalog_snapshot(home):
+            if item["id"] == agent:
+                title = item["title"]
+                break
+        plan.append({"agent": agent, "title": title, "ok": ok, "path": path,
+                     "message": "; ".join(notes)})
+    return plan
+
+
+def _agent_catalog_snapshot(home=None):
+    try:
+        return agent_catalog(home=home)
+    except Exception:
+        return []
 
 
 def transfer_profiles(profiles, default_model="", agent_ids=None, home=None,
@@ -4568,17 +4891,22 @@ class AgentsDialog(tk.Toplevel):
             "profiles": [p["id"] for p in profiles],
         })
         if dry_run:
-            lines = ["Проверка (файлы не изменяются):"]
-            for agent in agents:
-                item = next((c for c in self.catalog if c["id"] == agent), None)
-                where = item["path"] if item else "—"
-                if agent == "vscode":
-                    lines.append("  • %s → расширение %s + %s" % (
-                        item["title"] if item else agent, VSCODE_EXT_ID,
-                        vscode_settings_path(self.home)))
-                else:
-                    lines.append("  • %s → %s" % (agent, where))
-            lines.append("Профилей: %d" % len(profiles))
+            plan = transfer_plan(
+                profiles, self.app.var_default_model.get(), agents,
+                home=self.home, config_path=str(self.app.config_path))
+            lines = ["Проверка (файлы не изменяются):", ""]
+            for res in plan:
+                mark = "OK " if res.get("ok") else "ВНИМАНИЕ "
+                lines.append("%s%s\n    %s\n    %s" % (
+                    mark, res.get("title") or res.get("agent"),
+                    str(res.get("path") or "—"), res.get("message") or ""))
+            lines.append("")
+            lines.append("Профилей: %d (моделей %d)" % (
+                len(profiles), sum(len(p.get("models") or []) for p in profiles)))
+            bad = [r for r in plan if not r.get("ok")]
+            if bad:
+                lines.append("Требуют внимания: %d из %d — перенос в них может не сработать"
+                             % (len(bad), len(plan)))
             self._report("\n".join(lines))
             return
         self.btn_import.configure(state="disabled")
