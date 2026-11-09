@@ -212,6 +212,16 @@ SHA-256 (первые 16): `E473D1F95E032EE0`, 16299 байт.
 публичном репозитории доступен всем, кто знает пароль; при утечке токены
 нужно перевыпустить.
 
+**Правило сборки (с 09.11.2026):** готовые exe всегда коммитятся и пушятся —
+`dist/OpenCodeProviderManager.exe` (onefile) и
+`dist/OpenCodeProviderManager/OpenCodeProviderManager.exe` (onedir), плюс
+`dist/OpenCodeProviderManager/_internal/base_library.zip` (он меняется при
+каждой пересборке). В `.gitignore` для этого уже есть `!dist/…` исключения,
+но `dist/*` остаётся игнорируемым, поэтому добавлять нужно явно:
+`git add -f dist/OpenCodeProviderManager.exe dist/OpenCodeProviderManager/OpenCodeProviderManager.exe`.
+Порядок: правки → тесты → `PyInstaller OCM-onefile.spec` →
+`PyInstaller OpenCodeProviderManager.spec` → коммит кода + exe → `git push`.
+
 ---
 
 ## 6. Что осталось / обратить внимание

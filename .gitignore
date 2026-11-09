@@ -54,3 +54,5 @@ dist/*
 !dist/OpenCodeProviderManager/**
 # портативная однофайловая сборка
 !dist/OpenCodeProviderManager.exe
+# архив конфига тоже в репозитории
+!dist/opencode-config-*.zip
