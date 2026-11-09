@@ -46,7 +46,7 @@ def test_export_payload_contains_every_profile(manager):
     payload = manager.build_export_payload(profiles, "alpha/a1")
 
     assert payload["type"] == "opencode-provider-profiles"
-    assert payload["version"] == 2
+    assert payload["version"] == 3
     assert [p["id"] for p in payload["profiles"]] == ["alpha", "beta", "gamma"]
     assert payload["default_model"] == "alpha/a1"
     assert "raw" in payload["profiles"][0]

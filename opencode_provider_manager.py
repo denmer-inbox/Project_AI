@@ -51,11 +51,42 @@ except Exception as exc:  # pragma: no cover
 
 APP_TITLE = "OpenCode — менеджер провайдеров"
 PACKAGES = [
+    "@opencode/ai/providers/openai-compatible",
     "@ai-sdk/openai-compatible",
     "@ai-sdk/openai",
     "@ai-sdk/anthropic",
     "@ai-sdk/google",
 ]
+
+#: Возможности модели, которые пользователь включает галочками. Значение —
+#: подпись в интерфейсе; ключ пишется в `capabilities` модели в opencode.json
+#: (и читается из него при загрузке). `output` в OpenCode — список типов,
+#: поэтому «веб» записывается строкой "web", как это делает models.dev.
+CAPABILITY_KEYS = (
+    ("tools", "ИНСТРУМЕНТЫ (TOOLS)"),
+    ("vision", "ВИДИТ ИЗОБРАЖЕНИЯ (VISION)"),
+    ("audio", "ВИДИТ/СЛЫШИТ АУДИО"),
+    ("video", "ВИДИТ ВИДЕО"),
+    ("web", "ВЕБ-ПОИСК"),
+    ("reasoning", "РАССУЖДЕНИЯ (REASONING)"),
+    ("temperature", "ТЕМПЕРАТУРА"),
+    ("attachment", "ВЛОЖЕНИЯ"),
+)
+
+CAPABILITY_LABELS = dict(CAPABILITY_KEYS)
+
+#: Одноимённые ключи модели (не в capabilities), которые дописываются, когда
+#: галочка стоит. Если галочка снята — ключ удаляется. `null` — ключ не нужен.
+#:
+#: ВЛОЖЕНИЯ намеренно не пишутся в модель ключом `attachment`: официальная
+#: схема OpenCode (Config.ModelEncoded, additionalProperties: false) такого
+#: ключа у модели не знает, и конфиг становится невалидным. Вложить файл
+#: в модель можно, только если у неё есть типы входа image/audio/video —
+#: то есть через галочки VISION/АУДИО/ВИДЕО. Галочка ВЛОЖЕНИЯ управляет
+#: той же тройкой и записывается туда единым образом.
+CAPABILITY_EXTRAS = {
+    "attachment": None,
+}
 
 
 # ==========================================================================
@@ -668,8 +699,11 @@ def profiles_from_config(config: dict) -> list:
         settings = proxy.get("settings") if isinstance(proxy.get("settings"), dict) else {}
         models_spec = proxy.get("models") if isinstance(proxy.get("models"), dict) else {}
         selected, known = [], []
+        capabilities = {}
         for mid, spec in models_spec.items():
             known.append(mid)
+            if isinstance(spec, dict):
+                capabilities[mid] = _capability_flags_from_spec(spec)
             if isinstance(spec, dict) and spec.get("disabled"):
                 continue
             selected.append(mid)
@@ -685,6 +719,7 @@ def profiles_from_config(config: dict) -> list:
             "package": proxy.get("package") or PACKAGES[0],
             "models": selected,
             "known_models": known,
+            "model_capabilities": capabilities,
             "extra_settings": {k: v for k, v in settings.items()
                                if k not in ("baseURL", "apiKey")},
             "_raw": copy.deepcopy(proxy),
@@ -712,7 +747,151 @@ def parse_model_ref(ref: str):
     return pid.strip(), mid.strip()
 
 
-def model_spec(model: dict, existing=None) -> dict:
+def _capability_flags_from_spec(spec) -> dict:
+    """Что известно о возможностях модели в конфиге -> флаги для галочек."""
+    flags = {}
+    spec = spec if isinstance(spec, dict) else {}
+    caps = spec.get("capabilities") if isinstance(spec.get("capabilities"), dict) else {}
+    if isinstance(caps.get("tools"), bool):
+        flags["tools"] = caps["tools"]
+    inputs = capabilities_inputs(spec)
+    flags["vision"] = "image" in inputs
+    flags["audio"] = "audio" in inputs
+    flags["video"] = "video" in inputs
+    outputs = caps.get("output")
+    if isinstance(outputs, str):
+        outputs = outputs.split()
+    outputs = [str(x) for x in outputs] if isinstance(outputs, list) else []
+    flags["web"] = "web" in outputs
+    reasoning = caps.get("reasoning")
+    if isinstance(reasoning, dict):
+        # нет явного supported — значит, описан только набор effort: это
+        # всё равно включает рассуждения
+        flags["reasoning"] = bool(reasoning.get("supported", True))
+    elif isinstance(reasoning, bool):
+        flags["reasoning"] = reasoning
+    flags["temperature"] = caps.get("temperature") is not False
+    # «вложения» = модели можно отдать файл (картинку/аудио/видео).
+    flags["attachment"] = any(k in inputs for k in ("image", "audio", "video"))
+    return flags
+
+
+def capabilities_inputs(spec) -> list:
+    """Типы входа модели: `capabilities.input` строкой или списком."""
+    caps = spec.get("capabilities") if isinstance(spec, dict) else None
+    caps = caps if isinstance(caps, dict) else {}
+    value = caps.get("input")
+    if isinstance(value, str):
+        value = value.split()
+    if not isinstance(value, list):
+        return ["text"]
+    return [str(x) for x in value] or ["text"]
+
+
+def model_supports_vision(spec, discovery=None) -> bool:
+    """Видит ли модель картинки: по конфигу, иначе по данным провайдера."""
+    if isinstance(spec, dict) and spec.get("capabilities") is not None:
+        return "image" in capabilities_inputs(spec)
+    return bool((discovery or {}).get("vision"))
+
+
+def profile_model_vision(profile, mid) -> bool:
+    """Видит ли модель картинки по профилю менеджера (галочки или конфиг)."""
+    flags = (profile.get("model_capabilities") or {}).get(mid) or {}
+    if "vision" in flags:
+        return bool(flags.get("vision"))
+    raw_models = (profile.get("_raw") or {}).get("models") or {}
+    existing = raw_models.get(mid) if isinstance(raw_models, dict) else None
+    return model_supports_vision(existing)
+
+
+def model_capabilities(model: dict, existing=None) -> dict:
+    """Флаги возможностей для галочек: явное значение из конфига, иначе
+    предположение (инструменты есть, картинки — если провайдер так сказал)."""
+    flags = _capability_flags_from_spec(existing)
+    if not flags:
+        return {
+            "tools": True,
+            "vision": bool(model.get("vision")),
+            "audio": False,
+            "video": False,
+            "web": False,
+            "reasoning": False,
+            "temperature": False,
+            "attachment": bool(model.get("vision")),
+        }
+    return flags
+
+
+def _apply_capabilities(spec: dict, flags) -> dict:
+    """Пишет выбранные галочки в `capabilities` модели.
+
+    Всё, что понимает OpenCode, живёт внутри `capabilities`:
+    tools/input/output/reasoning/temperature. Ключа `attachment` у модели нет —
+    вложить файл можно только через типы входа, поэтому галочка ВЛОЖЕНИЯ
+    дописывает image/audio/video к уже выбранным (сама типы не убирает).
+    """
+    flags = flags if isinstance(flags, dict) else {}
+    caps = spec.get("capabilities")
+    caps = copy.deepcopy(caps) if isinstance(caps, dict) else {}
+    # мусор из старых версий: невалидные для схемы OpenCode ключи модели
+    spec.pop("attachment", None)
+
+    if flags.get("tools") is not None:
+        caps["tools"] = bool(flags.get("tools"))
+    caps.setdefault("tools", True)
+
+    current = caps.get("input") if isinstance(caps.get("input"), list) else []
+    attachment_on = bool(flags.get("attachment"))
+    inputs = []
+    for key, kind in (("vision", "image"), ("audio", "audio"), ("video", "video")):
+        if flags.get(key) is None:
+            # галочки нет — оставляем как было в конфиге
+            wanted = kind in current
+        else:
+            wanted = bool(flags.get(key))
+        if attachment_on:
+            wanted = True
+        if wanted:
+            inputs.append(kind)
+    caps["input"] = ["text"] + inputs
+
+    outputs = caps.get("output")
+    if isinstance(outputs, str):
+        outputs = outputs.split()
+    outputs = [str(x) for x in outputs] if isinstance(outputs, list) else ["text"]
+    was_web = "web" in outputs
+    outputs = [x for x in outputs if x != "web"]
+    if flags.get("web") is None:
+        if was_web:
+            outputs.append("web")
+    elif flags.get("web"):
+        outputs.append("web")
+    caps["output"] = outputs or ["text"]
+
+    if flags.get("reasoning") is not None:
+        want = bool(flags.get("reasoning"))
+        current = caps.get("reasoning")
+        if isinstance(current, dict):
+            if want:
+                current["supported"] = True
+            else:
+                # выключено = возможностей рассуждений нет вовсе; отдельная
+                # запись supported:false вызывает у OpenCode сомнения при
+                # разборе, поэтому ключ убираем целиком
+                caps.pop("reasoning", None)
+        elif want:
+            caps["reasoning"] = {"supported": True}
+        else:
+            caps.pop("reasoning", None)
+    if flags.get("temperature") is not None:
+        caps["temperature"] = bool(flags.get("temperature"))
+
+    spec["capabilities"] = caps
+    return spec
+
+
+def model_spec(model: dict, existing=None, flags=None) -> dict:
     spec = copy.deepcopy(existing) if isinstance(existing, dict) else {}
     spec.pop("disabled", None)
     spec.setdefault("name", model.get("display") or model["id"])
@@ -723,16 +902,20 @@ def model_spec(model: dict, existing=None) -> dict:
         limit["output"] = int(model["output"])
     if limit:
         spec["limit"] = limit
-    caps = spec.get("capabilities") if isinstance(spec.get("capabilities"), dict) else {}
-    if model.get("tools") is not None:
-        caps["tools"] = bool(model["tools"])
-    caps.setdefault("tools", True)
-    if model.get("vision"):
-        caps["input"] = ["text", "image"]
-    caps.setdefault("input", ["text"])
-    caps.setdefault("output", ["text"])
-    spec["capabilities"] = caps
-    return spec
+    if flags is None:
+        # галочек нет (профиль из старого файла): не теряем старые значения,
+        # а новые подхватываем из ответа провайдера, как раньше
+        caps = spec.get("capabilities") if isinstance(spec.get("capabilities"), dict) else {}
+        if model.get("tools") is not None:
+            caps["tools"] = bool(model["tools"])
+        caps.setdefault("tools", True)
+        if model.get("vision"):
+            caps["input"] = ["text", "image"]
+        caps.setdefault("input", ["text"])
+        caps.setdefault("output", ["text"])
+        spec["capabilities"] = caps
+        return spec
+    return _apply_capabilities(spec, flags)
 
 
 def _strip_coef(obj):
@@ -754,6 +937,17 @@ def read_coefficient(config: dict, pid: str) -> str:
     return str(val)
 
 
+def is_chat_completions_package(package) -> bool:
+    """Пакет, в котором `settings.apiKey` реально передаётся в запрос."""
+    return "openai-compatible" in (package or "").lower()
+
+
+def _env_key(pid: str) -> str:
+    """Имя переменной с ключом профиля (providers.<id>.env)."""
+    safe = re.sub(r"[^A-Za-z0-9]+", "_", str(pid)).strip("_").upper() or "PROVIDER"
+    return "OPENCODE_%s_API_KEY" % safe
+
+
 def build_provider(profile: dict) -> dict:
     settings = {}
     base = normalize_base_url(profile.get("base_url", ""))
@@ -771,14 +965,24 @@ def build_provider(profile: dict) -> dict:
         proxy.pop("_coefficient", None)
     proxy["name"] = profile.get("display_name") or profile.get("id")
     proxy["package"] = profile.get("package") or PACKAGES[0]
+    if not is_chat_completions_package(proxy["package"]):
+        # Только openai-compatible отправляет settings.apiKey в запрос. Другие
+        # пакеты (openai, anthropic, google) берут ключ из окружения — иначе
+        # OpenCode отвечает «API key is required». Отдаём ключ через env.
+        env_name = _env_key(profile.get("id") or "")
+        proxy["env"] = [env_name]
+        settings["apiKey"] = "{env:%s}" % env_name
+        os.environ[env_name] = profile["api_key"]
     if settings:
         proxy["settings"] = settings
     else:
         proxy.pop("settings", None)
     old_models = proxy.get("models") if isinstance(proxy.get("models"), dict) else {}
+    flags_by_model = profile.get("model_capabilities") or {}
     models = {}
     for mid in profile.get("models") or []:
-        models[mid] = model_spec({"id": mid}, old_models.get(mid))
+        models[mid] = model_spec({"id": mid}, old_models.get(mid),
+                                 flags_by_model.get(mid))
     for mid, spec in old_models.items():
         if mid in models:
             continue
@@ -790,6 +994,36 @@ def build_provider(profile: dict) -> dict:
     else:
         proxy.pop("models", None)
     return proxy
+
+
+def migrate_provider_keys(config: dict) -> list:
+    """Лечит профили, созданные версией, которая выбирала пакет
+    `@ai-sdk/openai` (ключ из `settings.apiKey` там не читается).
+
+    Возвращает список ID исправленных провайдеров.
+    """
+    fixed = []
+    providers = config.get("providers") if isinstance(config, dict) else None
+    if not isinstance(providers, dict):
+        return fixed
+    for pid, proxy in providers.items():
+        if not isinstance(proxy, dict):
+            continue
+        if is_chat_completions_package(proxy.get("package")):
+            continue
+        settings = proxy.get("settings")
+        settings = settings if isinstance(settings, dict) else {}
+        key = settings.get("apiKey") or ""
+        if not key.startswith("sk-cvc-"):
+            continue
+        proxy["package"] = "@opencode/ai/providers/openai-compatible"
+        env_name = _env_key(pid)
+        proxy["env"] = [env_name]
+        settings["apiKey"] = "{env:%s}" % env_name
+        os.environ[env_name] = key
+        proxy["settings"] = settings
+        fixed.append(pid)
+    return fixed
 
 
 def apply_profiles(config: dict, profiles: list) -> dict:
@@ -809,7 +1043,7 @@ def apply_profiles(config: dict, profiles: list) -> dict:
 # ==========================================================================
 
 EXPORT_TYPE = "opencode-provider-profiles"
-EXPORT_VERSION = 2
+EXPORT_VERSION = 3
 EXPORT_TYPE_SINGLE = "opencode-provider-profile"
 
 
@@ -824,6 +1058,7 @@ def profile_to_export(profile: dict) -> dict:
         "api_key": profile["api_key"],
         "models": list(profile["models"]),
         "known_models": list(profile["known_models"]),
+        "model_capabilities": copy.deepcopy(profile.get("model_capabilities") or {}),
         "extra_settings": profile.get("extra_settings") or {},
         "raw": profile.get("_raw") or {},
     }
@@ -851,6 +1086,8 @@ def profile_from_export(raw: dict) -> dict:
         raise ValueError("отсутствует корректный ID профиля")
     models = [str(m) for m in (raw.get("models") or []) if str(m).strip()]
     known = [str(m) for m in (raw.get("known_models") or models) if str(m).strip()]
+    caps = raw.get("model_capabilities")
+    caps = copy.deepcopy(caps) if isinstance(caps, dict) else {}
     return {
         "id": pid,
         "display_name": raw.get("display_name") or pid,
@@ -860,6 +1097,7 @@ def profile_from_export(raw: dict) -> dict:
         "package": raw.get("package") or PACKAGES[0],
         "models": models,
         "known_models": known,
+        "model_capabilities": caps,
         "extra_settings": raw.get("extra_settings") or {},
         "_raw": raw.get("raw") or None,
     }
@@ -958,6 +1196,16 @@ def merge_profiles_into_config(config: dict, profiles: list) -> dict:
             settings[key] = value
         base["name"] = profile.get("display_name") or pid
         base["package"] = profile.get("package") or PACKAGES[0]
+        env_name = ""
+        if not is_chat_completions_package(base["package"]):
+            # пакет не читает settings.apiKey — ключ уходит через окружение
+            env_name = _env_key(pid)
+            base["env"] = [env_name]
+            settings["apiKey"] = "{env:%s}" % env_name
+            if profile.get("api_key"):
+                os.environ[env_name] = profile["api_key"]
+        elif env_name and base.get("env") == [env_name]:
+            base.pop("env", None)
         if settings:
             base["settings"] = settings
         coef = str(profile.get("coefficient") or "").strip()
@@ -968,8 +1216,10 @@ def merge_profiles_into_config(config: dict, profiles: list) -> dict:
         # что пользователь не выбирал (иначе пропадали модели из OpenCode).
         old_models = base.get("models") if isinstance(base.get("models"), dict) else {}
         old_models = dict(old_models) if isinstance(old_models, dict) else {}
+        flags_by_model = profile.get("model_capabilities") or {}
         for mid in list(profile.get("models") or []):
-            spec = model_spec({"id": mid}, old_models.get(mid))
+            spec = model_spec({"id": mid}, old_models.get(mid),
+                              flags_by_model.get(mid))
             spec.pop("disabled", None)
             old_models[mid] = spec
         if old_models:
@@ -1338,11 +1588,6 @@ def _provider_kind(package: str, base_url: str = "") -> str:
     return "openai"
 
 
-def _env_key(pid: str) -> str:
-    safe = re.sub(r"[^A-Za-z0-9]+", "_", str(pid)).strip("_").upper() or "PROVIDER"
-    return "OPENCODE_%s_API_KEY" % safe
-
-
 def _toml_quote(value) -> str:
     return json.dumps(str(value), ensure_ascii=False)
 
@@ -1657,7 +1902,7 @@ def _transfer_cline(profiles, default_model, home=None):
         known = entry.get("models") if isinstance(entry.get("models"), dict) else {}
         for mid in profile.get("models") or []:
             spec = known.get(mid) if isinstance(known.get(mid), dict) else {}
-            spec["supportsVision"] = False
+            spec["supportsVision"] = profile_model_vision(profile, mid)
             known[mid] = spec
         entry["models"] = known
         per_provider[pid] = entry
@@ -1690,14 +1935,17 @@ def _transfer_continue(profiles, default_model, home=None):
     for profile in profiles:
         kind = _provider_kind(profile.get("package"), profile.get("base_url"))
         for mid in profile.get("models") or []:
-            kept.append({
+            entry = {
                 "name": "%s · %s" % (profile.get("display_name") or profile.get("id"), mid),
                 "provider": kind,
                 "model": mid,
                 "apiBase": profile.get("base_url"),
                 "apiKey": profile.get("api_key") or "",
                 "roles": list(CONTINUE_ROLES),
-            })
+            }
+            if profile_model_vision(profile, mid):
+                entry["capabilities"] = ["tool_use", "image_input"]
+            kept.append(entry)
             added += 1
     doc["models"] = kept
     _backup_file(path)
@@ -2169,11 +2417,14 @@ class ProfileDialog(tk.Toplevel):
         self._results = queue.Queue()
         self.models = []
         self.model_vars = {}
+        self.capability_vars = {}
+        self.capability_hidden = set()
         self.known_models = list((profile or {}).get("known_models", []))
         self._raw = (profile or {}).get("_raw")
 
         self.title("НОВЫЙ ПРОФИЛЬ" if self.is_new else "ПРОФИЛЬ " + str(profile["id"]).upper())
-        self.geometry("860x720")
+        # окно повыше: у моделей раскрываются галочки возможностей
+        self.geometry("860x880")
         self.minsize(760, 470)   # меньше нельзя: строкам ввода и кнопкам нужно место
         self.configure(bg=T.bg)
         self.transient(app.root)
@@ -2312,6 +2563,10 @@ class ProfileDialog(tk.Toplevel):
         tk.Label(khint,
                  text="SHIFT+КЛИК — ИНВЕРСИЯ   •   CTRL+КЛИК — ВКЛ/ВЫКЛ ВСЁ",
                  bg=T.bg, fg=T.cyan_soft, font=T.mono_small).pack(anchor="w", padx=2)
+        tk.Label(khint,
+                 text="«ВОЗМОЖНОСТИ» — ЧТО ПРОВАЙДЕР УМЕЕТ. ГАЛОЧКИ ПИШУТСЯ В "
+                      "opencode.json (capabilities: input/output, tools, reasoning)",
+                 bg=T.bg, fg=T.ink_dim, font=T.mono_small).pack(anchor="w", padx=2)
 
         srow = tk.Frame(mid, bg=T.bg)
         srow.pack(fill="x", pady=(6, 4))
@@ -2409,9 +2664,60 @@ class ProfileDialog(tk.Toplevel):
                 return m.get("display") or mid
         return mid
 
+    def _model_entry(self, mid):
+        for m in self.models:
+            if m["id"] == mid:
+                return m
+        return {"id": mid}
+
+    def _cap_vars(self, mid):
+        """Галочки возможностей модели: что в конфиге, иначе предположение."""
+        if mid not in self.capability_vars:
+            existing = None
+            raw_models = (self._raw or {}).get("models") or {}
+            if isinstance(raw_models, dict) and isinstance(raw_models.get(mid), dict):
+                existing = raw_models.get(mid)
+            flags = model_capabilities(self._model_entry(mid), existing)
+            self.capability_vars[mid] = {
+                key: tk.BooleanVar(master=self, value=bool(flags.get(key)))
+                for key, _ in CAPABILITY_KEYS
+            }
+        return self.capability_vars[mid]
+
+    def _has_capability_flags(self, mid):
+        raw_models = (self._raw or {}).get("models") or {}
+        existing = raw_models.get(mid) if isinstance(raw_models, dict) else None
+        if not isinstance(existing, dict):
+            return False
+        return bool(existing.get("capabilities"))
+
+    def _cap_summary(self, mid):
+        """Короткая строка для закрытого вида: «tool vision»."""
+        vars_ = self._cap_vars(mid)
+        names = [key for key, _ in CAPABILITY_KEYS if vars_[key].get()]
+        return " · ".join(names) or "нет"
+
+    def _toggle_caps(self, mid):
+        if mid in self.capability_hidden:
+            self.capability_hidden.discard(mid)
+        else:
+            self.capability_hidden.add(mid)
+        self._render_models()
+
+    def _refresh_cap_summary(self, mid):
+        btn = (getattr(self, "cap_buttons", {}) or {}).get(mid)
+        if btn is None:
+            return
+        try:
+            btn.configure(text="ВОЗМОЖНОСТИ: %s" % self._cap_summary(mid))
+        except Exception:
+            pass
+
     def _render_models(self):
-        for child in self.inner.winfo_children():
+        for child in list(self.inner.winfo_children()):
+            child.pack_forget()
             child.destroy()
+        self.cap_buttons = {}
         self._update_counter()
         if not self.models:
             tk.Label(self.inner, text="МОДЕЛЕЙ ПОКА НЕТ — ПРОВЕРЬТЕ URL/КЛЮЧ",
@@ -2431,9 +2737,35 @@ class ProfileDialog(tk.Toplevel):
             text = self._display_for(mid)
             if text != mid:
                 text = "%s   (%s)" % (text, mid)
-            cb = SmartCheck(self.inner, self, self.model_vars[mid], text)
+            row = tk.Frame(self.inner, bg=T.bg_panel)
+            row.pack(anchor="w", padx=8, pady=1, fill="x")
+            cb = SmartCheck(row, self, self.model_vars[mid], text)
             cb.var = self.model_vars[mid]
-            cb.pack(anchor="w", padx=8, pady=1, fill="x")
+            cb.pack(anchor="w", fill="x")
+            caps_var = tk.BooleanVar(master=self, value=(mid not in self.capability_hidden))
+            btn = tk.Checkbutton(
+                row, text="ВОЗМОЖНОСТИ: %s" % self._cap_summary(mid),
+                variable=caps_var, onvalue=True, offvalue=False,
+                command=lambda mid=mid: self._toggle_caps(mid),
+                bg=T.bg_panel, fg=T.cyan_dim, selectcolor=T.bg_input,
+                activebackground=T.bg_panel, activeforeground=T.cyan,
+                font=T.mono_small, bd=0, highlightthickness=0, anchor="w")
+            btn.pack(anchor="w", padx=(24, 0))
+            self.cap_buttons[mid] = btn
+            if mid in self.capability_hidden:
+                continue
+            caps_row = tk.Frame(row, bg=T.bg_input)
+            caps_row.pack(anchor="w", padx=(28, 4), pady=(1, 4), fill="x")
+            vars_ = self._cap_vars(mid)
+            for col, (key, label) in enumerate(CAPABILITY_KEYS):
+                var = vars_[key]
+                var.trace_add("write", lambda *a, m=mid: self._refresh_cap_summary(m))
+                tk.Checkbutton(
+                    caps_row, text=label, variable=var,
+                    bg=T.bg_input, fg=T.ink, selectcolor=T.bg_panel_hi,
+                    activebackground=T.bg_input, activeforeground=T.cyan,
+                    font=T.mono_small, bd=0, highlightthickness=0, anchor="w"
+                ).grid(row=col // 3, column=col % 3, sticky="w", padx=(4, 12), pady=1)
         if shown == 0:
             tk.Label(self.inner, text="ПО ФИЛЬТРУ НИЧЕГО НЕ НАЙДЕНО",
                      bg=T.bg_panel, fg=T.ink_dim,
@@ -2582,6 +2914,10 @@ class ProfileDialog(tk.Toplevel):
             "package": self.var_pkg.get(),
             "models": chosen,
             "known_models": [m["id"] for m in self.models] or list(self.known_models),
+            "model_capabilities": {
+                mid: {key: bool(var.get()) for key, var in caps.items()}
+                for mid, caps in self.capability_vars.items()
+            },
             "set_default": bool(self.var_set_default.get()),
             "coefficient": self.var_coef.get().strip(),
             "_raw": copy.deepcopy(self._raw) if self._raw else None,
@@ -5231,6 +5567,7 @@ class App:
                       "package": p.get("package"),
                       "models": list(p.get("models") or []),
                       "known_models": list(p.get("known_models") or []),
+                      "model_capabilities": p.get("model_capabilities") or {},
                       "extra_settings": p.get("extra_settings") or {},
                       "coefficient": p.get("coefficient")}
                      for p in self.profiles]
@@ -5369,6 +5706,7 @@ class App:
             "package": res["package"],
             "models": list(res["models"]),
             "known_models": list(res["known_models"]),
+            "model_capabilities": copy.deepcopy(res.get("model_capabilities") or {}),
             "coefficient": res.get("coefficient") or "",
             "extra_settings": res.get("extra_settings") or {},
             "_raw": res.get("_raw"),
@@ -5809,6 +6147,7 @@ class App:
             ref = self.var_default_model.get().strip()
             if ref and ref != "(не задана)":
                 new_config["model"] = ref
+            fixed = migrate_provider_keys(new_config)
             backup = save_config(self.config_path, new_config)
         except Exception as exc:
             messagebox.showerror("Запись конфига", str(exc), parent=self.root)
@@ -5821,10 +6160,15 @@ class App:
         self._refresh_dirty_marker()
         msg = "Конфиг записан. Предыдущая версия: %s" % (backup.name if backup else "—")
         self._set_status(msg.upper())
+        extra = ""
+        if fixed:
+            extra = ("\n\nИсправлен package у провайдеров с ключом sk-cvc-*: %s\n"
+                     "(@ai-sdk/openai не передаёт ключ — OpenCode отвечал "
+                     "«API key is required»)" % ", ".join(fixed))
         messagebox.showinfo(
             "Готово",
-            "%s\n\nФайл: %s\n\nОткат: кнопка «ИСТОРИЯ И ОТКАТ…» или Ctrl+Z" % (
-                msg, self.config_path), parent=self.root)
+            "%s\n\nФайл: %s\n\nОткат: кнопка «ИСТОРИЯ И ОТКАТ…» или Ctrl+Z%s" % (
+                msg, self.config_path, extra), parent=self.root)
         if not was_dirty:
             self._set_status("СОХРАНЕНА КОНТРОЛЬНАЯ ТОЧКА: " + (backup.name if backup else "—"))
 
