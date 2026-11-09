@@ -28,11 +28,14 @@ import shutil
 import socket
 import ssl
 import sys
+import tarfile
+import tempfile
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -3171,6 +3174,591 @@ def event_keycode(event):
     return _int_attr(event, "keycode")
 
 
+# ==========================================================================
+# MCP-серверы и скиллы (инструменты для OpenCode и других агентов)
+# ==========================================================================
+#
+# Что делает этот раздел:
+#   * MCP — дописывает записи в `mcp` конфига OpenCode (и в JSON-конфиги
+#     остальных агентов, у которых есть файл настроек) по образцам из каталога;
+#   * скиллы — умеет посмотреть установленные, проверить файл-каталог скиллов
+#     (папку, ZIP или tar.gz — архив открывается только если внутри есть
+#     SKILL.md) и разложить их по папке OpenCode, не задевая чужие.
+#
+# Ничего чужого не удаляется: перед любой записью делается копия, а каждое
+# действие возвращает отчёт из тех же полей, что перенос профилей.
+
+    mcp_placeholder = "C:\\путь\\к\\папке"
+
+#: Каталог MCP-серверов. `build` собирает проводку из полей (сам конфиг сюда
+#: не пишется), `fields` — то, что спрашивают у пользователя в окне.
+MCP_CATALOG = (
+    {
+        "id": "rea",
+        "title": "REA — реверс-инжиниринг (нативный/браузер/менеджер пакетов)",
+        "description": "rea-agents через npx. Ghidra/JDK необязательны: без них "
+                       "работают Frida, Rizin, браузер и разбор пакетов.",
+        "kind": "local",
+        "command": ["cmd.exe", "/d", "/c", "npx", "-y", "rea-agents@6.7.0", "mcp"],
+        "fields": (
+            {"key": "GHIDRA_INSTALL_DIR", "label": "Ghidra (пусто — не нужна)"},
+            {"key": "JAVA_HOME", "label": "JAVA_HOME (пусто — не нужен)"},
+        ),
+        "requires": "node",
+    },
+    {
+        "id": "filesystem",
+        "title": "Filesystem — доступ к папкам",
+        "description": "Официальный сервер @modelcontextprotocol/server-filesystem: "
+                       "чтение/запись только в разрешённых папках.",
+        "kind": "local",
+        "command": ["cmd.exe", "/d", "/c", "npx", "-y",
+                    "@modelcontextprotocol/server-filesystem@2025.7.1"],
+        "path_args": True,
+        "fields": ({"key": "path", "label": "Разрешённая папка", "required": True,
+                    "path_arg": True},),
+        "requires": "node",
+    },
+    {
+        "id": "memory",
+        "title": "Memory — заметки между сессиями",
+        "description": "Официальный сервер памяти @modelcontextprotocol/server-memory "
+                       "(граф знаний в JSON).",
+        "kind": "local",
+        "command": ["cmd.exe", "/d", "/c", "npx", "-y",
+                    "@modelcontextprotocol/server-memory@2025.7.1"],
+        "fields": (),
+        "requires": "node",
+    },
+    {
+        "id": "sequential-thinking",
+        "title": "Sequential Thinking — цепочки рассуждений",
+        "description": "Сервер @modelcontextprotocol/server-sequential-thinking: "
+                       "пошаговое планирование для сложных задач.",
+        "kind": "local",
+        "command": ["cmd.exe", "/d", "/c", "npx", "-y",
+                    "@modelcontextprotocol/server-sequential-thinking@2025.7.1"],
+        "fields": (),
+        "requires": "node",
+    },
+    {
+        "id": "github",
+        "title": "GitHub — issues, PR, файлы репозиториев",
+        "description": "Официальный remote-сервер https://api.githubcopilot.com/mcp/. "
+                       "Нужен токен GitHub с правами на репозитории.",
+        "kind": "remote",
+        "url": "https://api.githubcopilot.com/mcp/",
+        "fields": ({"key": "GITHUB_PAT", "label": "GitHub token (ghp_…)", "secret": True,
+                    "required": True, "env": True},),
+        "requires": "network",
+    },
+)
+
+MCP_SERVER_IDS = tuple(item["id"] for item in MCP_CATALOG)
+
+#: Файлы-настройки MCP у остальных агентов (`mcpServers` — их общий формат).
+MCP_AGENT_FILES = (
+    ("claude", "Claude Code", lambda home: claude_settings_path(home)),
+    ("codex", "Codex CLI", lambda home: _home_dir(home) / ".codex" / "config.toml"),
+    ("cline", "Cline", lambda home: cline_dir(home) / "mcp_settings.json"),
+    ("vscode", "VS Code", lambda home: vscode_user_dir(home) / "mcp.json"),
+)
+
+#: Где OpenCode ищет скиллы, если в конфиге нет ключа `skills`.
+SKILLS_FOLDER = "skills"
+
+
+def mcp_catalog_entry(server_id):
+    for item in MCP_CATALOG:
+        if item["id"] == server_id:
+            return item
+    return None
+
+
+def mcp_server_entry(item, values=None) -> dict:
+    """Собирает запись для `mcp.<id>` из каталога и значений полей.
+
+    Значения-секреты пишутся не открытым текстом, а подстановкой
+    `{env:ИМЯ}`: OpenCode возьмёт переменную из окружения, а конфиг можно
+    безопасно копировать и архивировать.
+    """
+    values = values if isinstance(values, dict) else {}
+    if item.get("kind") == "remote":
+        headers = {}
+        for field in item.get("fields") or ():
+            value = str(values.get(field["key"]) or "").strip()
+            if not value:
+                if field.get("required"):
+                    raise ValueError("не заполнено поле «%s»" % field["label"])
+                continue
+            if field.get("secret"):
+                headers["Authorization"] = "Bearer {env:%s}" % field["key"]
+            else:
+                headers["X-%s" % field["key"]] = value
+        entry = {"type": "remote", "url": item["url"], "enabled": True}
+        if headers:
+            entry["headers"] = headers
+        return _norm_mcp_entry(entry)
+
+    command = list(item.get("command") or [])
+    if item.get("path_args"):
+        path = str(values.get("path") or "").strip()
+        if not path:
+            raise ValueError("не заполнена папка для сервера «%s»" % item["id"])
+        command.append(os.path.expanduser(path))
+    entry = {"type": "local", "command": command, "enabled": True}
+    environment = {}
+    for field in item.get("fields") or ():
+        value = str(values.get(field["key"]) or "").strip()
+        if not value:
+            if field.get("required"):
+                raise ValueError("не заполнено поле «%s»" % field["label"])
+            continue
+        if field.get("env"):
+            # секрет: в файл попадает только ссылка на переменную окружения
+            environment[field["key"]] = "{env:%s}" % field["key"]
+        elif not field.get("path_arg"):
+            environment[field["key"]] = value
+    if environment:
+        entry["environment"] = environment
+    return _norm_mcp_entry(entry)
+
+
+def _norm_mcp_entry(entry) -> dict:
+    """Запись сервера в формате `mcp.servers`.
+
+    В новой схеме вместо `enabled` используется `disabled`, поэтому выключенный
+    или включённый сервер пишется явно, а лишний ключ убирается.
+    """
+    result = {k: v for k, v in dict(entry or {}).items() if k != "enabled"}
+    if entry.get("enabled") is False:
+        result["disabled"] = True
+    else:
+        result["disabled"] = False
+    return result
+
+
+def mcp_entry_secrets(entry) -> dict:
+    """Переменные окружения, которые запись ждёт через `{env:ИМЯ}`."""
+    result = {}
+    if not isinstance(entry, dict):
+        return result
+    values = list((entry.get("headers") or {}).values())
+    values += list((entry.get("environment") or {}).values())
+    for value in values:
+        for name in re.findall(r"\{env:([A-Za-z_][A-Za-z0-9_]*)\}", str(value)):
+            result[name] = None
+    return result
+
+
+def mcp_servers_map(config) -> dict:
+    """Рабочий словарь серверов `mcp.servers`.
+
+    Новая схема OpenCode хранит серверы в `mcp.servers` (в `mcp` разрешены
+    только `timeout`/`servers`). Старые конфиги держат их прямо в `mcp` —
+    такие записи поднимаем наверх, чтобы не потерять rea и прочие.
+    """
+    mcp = (config or {}).get("mcp")
+    if not isinstance(mcp, dict):
+        return {}
+    servers = mcp.get("servers") if isinstance(mcp.get("servers"), dict) else {}
+    for name, entry in mcp.items():
+        if name in ("servers", "timeout"):
+            continue
+        if isinstance(entry, dict):
+            servers.setdefault(name, entry)
+    return servers
+
+
+def _looks_like_server(entry) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    return any(key in entry for key in ("type", "command", "url"))
+
+
+def mcp_servers_from_config(config) -> dict:
+    """Серверы из конфига в читаемом виде: только включённые."""
+    servers = {}
+    for name, entry in mcp_servers_map(config).items():
+        if not _looks_like_server(entry):
+            # сокращённая запись вида {"enabled": true} — не сервер
+            continue
+        if entry.get("enabled") is False or entry.get("disabled") is True:
+            continue
+        kind = entry.get("type") or ("remote" if entry.get("url") else "local")
+        servers[name] = {
+            "type": kind,
+            "command": entry.get("command"),
+            "url": entry.get("url"),
+            "environment": entry.get("environment") or {},
+        }
+    return servers
+
+
+def _mcp_servers_style(entry) -> dict:
+    """Запись сервера в формате `mcpServers` (Claude Code, Cline, VS Code)."""
+    entry = entry if isinstance(entry, dict) else {}
+    if entry.get("type") == "remote":
+        result = {"type": "http", "url": entry.get("url")}
+        if entry.get("headers"):
+            result["headers"] = copy.deepcopy(entry["headers"])
+        return result
+    command = list(entry.get("command") or [])
+    result = {"command": command[0] if command else ""}
+    if len(command) > 1:
+        result["args"] = command[1:]
+    if entry.get("environment"):
+        result["env"] = copy.deepcopy(entry["environment"])
+    return result
+
+
+def _mcp_merge_check(config, name, entry) -> list:
+    """Чем новая запись отличается от уже записанной (для отчёта)."""
+    old = mcp_servers_map(config).get(name)
+    notes = []
+    if isinstance(old, dict):
+        for key in ("type", "command", "url", "environment"):
+            if old.get(key) != entry.get(key):
+                notes.append("обновлён «%s»" % key)
+    else:
+        notes.append("новый сервер")
+    return notes
+
+
+def _toml_mcp_block(name, entry) -> str:
+    """Блок `[mcp_servers.<id>]` для config.toml Codex CLI."""
+    lines = ["[mcp_servers.%s]" % name]
+    if entry.get("type") == "remote":
+        lines.append('url = "%s"' % entry.get("url"))
+        for key, value in (entry.get("headers") or {}).items():
+            lines.append("http_headers = { %s = %s }" % (json.dumps(key), json.dumps(value)))
+    else:
+        command = entry.get("command") or []
+        if command:
+            lines.append("command = %s" % json.dumps(command[0]))
+            if len(command) > 1:
+                lines.append("args = %s" % json.dumps(command[1:]))
+        env = entry.get("environment") or {}
+        if env:
+            pairs = ", ".join("%s = %s" % (json.dumps(k), json.dumps(v))
+                              for k, v in env.items())
+            lines.append("env = { %s }" % pairs)
+    return "\n".join(lines)
+
+
+def apply_mcp_servers(config, servers, mcp_config_path=None) -> dict:
+    """Дописывает MCP-серверы в конфиг OpenCode; остальное не трогает.
+
+    `servers` — {id: запись из `mcp_server_entry`}. Дополнительно (если задан
+    `mcp_config_path`) пишется сводный файл `{"mcpServers": …}` — его читают
+    Claude Code, Cline и VS Code.
+    """
+    new = copy.deepcopy(config) if isinstance(config, dict) else {}
+    report = {}
+    before = copy.deepcopy(new)
+    mcp = new.get("mcp")
+    if not isinstance(mcp, dict):
+        mcp = {}
+        new["mcp"] = mcp
+    # схема OpenCode: в `mcp` только `timeout` и `servers`, поэтому серверы
+    # живут в `mcp.servers`; старые записи «прямо в mcp» переносим туда же
+    legacy = {name: sc for name, sc in mcp.items()
+              if name not in ("servers", "timeout") and isinstance(sc, dict)}
+    for name in legacy:
+        mcp.pop(name, None)
+    box = mcp.get("servers")
+    if not isinstance(box, dict):
+        box = {}
+    box = {name: copy.deepcopy(sc) for name, sc in box.items() if isinstance(sc, dict)}
+    for name, sc in legacy.items():
+        # старые записи хранят включённость в `enabled` — приводим к `disabled`
+        box.setdefault(name, _norm_mcp_entry(sc))
+    for name, entry in (servers or {}).items():
+        report[name] = _mcp_merge_check(before, name, entry)
+        box[name] = copy.deepcopy(entry)
+        for env_name in mcp_entry_secrets(entry):
+            os.environ.setdefault(env_name, "")
+    mcp["servers"] = box
+    if mcp_config_path:
+        path = Path(mcp_config_path)
+        old = _read_json_lenient(path)
+        old = old if isinstance(old, dict) else {}
+        merged = old.get("mcpServers") if isinstance(old.get("mcpServers"), dict) else {}
+        merged = copy.deepcopy(merged)
+        for name, entry in (servers or {}).items():
+            merged[name] = _mcp_servers_style(entry)
+        old["mcpServers"] = merged
+        _backup_file(path)
+        _atomic_write(path, json.dumps(old, indent=2, ensure_ascii=False) + "\n")
+    return {"config": new, "changes": report}
+
+
+def install_mcp_servers(servers, config_path=None, home=None, mcp_config_path=None,
+                        mcp_agent_ids=None) -> list:
+    """Пишет серверы в opencode.json и в файлы выбранных агентов.
+
+    Возвращает список {agent, title, ok, path, backup, message}.
+    """
+    path = Path(config_path) if config_path else _resolve_config_path(None, home)
+    results = []
+    try:
+        config = load_config(path)
+        applied = apply_mcp_servers(config, servers, mcp_config_path=mcp_config_path)
+        backup = save_config(path, applied["config"])
+        parts = ["%s: %s" % (name, ", ".join(changes) or "без изменений")
+                 for name, changes in applied["changes"].items()]
+        results.append({
+            "agent": "opencode", "title": "OpenCode (этот конфиг)", "ok": True,
+            "path": path, "backup": backup,
+            "message": "; ".join(parts) or "серверы не выбраны",
+        })
+    except Exception as exc:
+        results.append({"agent": "opencode", "title": "OpenCode (этот конфиг)",
+                        "ok": False, "path": path, "backup": None,
+                        "message": str(exc)})
+
+    wanted = set(mcp_agent_ids or ())
+    for agent_id, title, path_fn in MCP_AGENT_FILES:
+        if agent_id not in wanted:
+            continue
+        target = path_fn(home)
+        try:
+            if agent_id == "codex":
+                results.append(_write_mcp_codex_toml(target, title, agent_id, servers))
+            else:
+                results.append(_write_mcp_json_file(target, title, agent_id, servers))
+        except Exception as exc:
+            results.append({"agent": agent_id, "title": title, "ok": False,
+                            "path": target, "backup": None, "message": str(exc)})
+    return results
+
+
+def _write_mcp_json_file(path: Path, title, agent_id, servers) -> dict:
+    data = _read_json_lenient(path)
+    if path.exists() and not isinstance(data, dict):
+        raise RuntimeError("файл не разбирается — пропущен")
+    data = copy.deepcopy(data) if isinstance(data, dict) else {}
+    box = data.get("mcpServers") if isinstance(data.get("mcpServers"), dict) else {}
+    box = copy.deepcopy(box)
+    for name, entry in (servers or {}).items():
+        box[name] = _mcp_servers_style(entry)
+    data["mcpServers"] = box
+    backup = _backup_file(path)
+    _atomic_write(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    return {"agent": agent_id, "title": title, "ok": True, "path": path,
+            "backup": backup, "message": "серверов в mcpServers: %d" % len(box)}
+
+
+def _write_mcp_codex_toml(path: Path, title, agent_id, servers) -> dict:
+    text = _read_text(path)
+    lines = []
+    for name, entry in (servers or {}).items():
+        # старый блок того же сервера убираем: TOML не разрешает дважды
+        # определять одну и ту же таблицу
+        pattern = re.compile(r"(?ms)^\[mcp_servers\.%s\]\s*\n.*?(?=^\[|\Z)"
+                             % re.escape(name))
+        text = pattern.sub("", text)
+        lines.append(_toml_mcp_block(name, entry))
+    if not lines:
+        return {"agent": agent_id, "title": title, "ok": True, "path": path,
+                "backup": None, "message": "серверы не выбраны"}
+    body = text.rstrip()
+    new_text = (body + "\n\n" if body else "") + "\n\n".join(lines) + "\n"
+    backup = _backup_file(path)
+    _atomic_write(path, new_text)
+    return {"agent": agent_id, "title": title, "ok": True, "path": path,
+            "backup": backup, "message": "записано блоков [mcp_servers.*]: %d"
+                                         % len(lines)}
+
+
+# --- скиллы ----------------------------------------------------------------
+
+
+def skills_base_dir(config=None, home=None) -> Path:
+    """Папка скиллов: из конфига (`skills`), иначе ~/.config/opencode/skills."""
+    value = (config or {}).get("skills")
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, str) and item.strip():
+                candidate = Path(os.path.expanduser(item.strip()))
+                if not candidate.is_absolute():
+                    candidate = _home_dir(home) / ".config" / "opencode" / candidate
+                return candidate
+    if isinstance(value, dict) and isinstance(value.get("paths"), list):
+        for item in value["paths"]:
+            if isinstance(item, str) and item.strip():
+                return Path(os.path.expanduser(item.strip()))
+    return _home_dir(home) / ".config" / "opencode" / SKILLS_FOLDER
+
+
+def skill_manifest(path) -> dict:
+    """Шапка SKILL.md (`name:` и `description:` из YAML-фронтматтера)."""
+    text = _read_text(Path(path))
+    result = {"name": "", "description": ""}
+    if not text.lstrip().startswith("---"):
+        return result
+    body = text.lstrip().split("\n")[1:]
+    for line in body:
+        if line.strip() == "---":
+            break
+        if ":" in line:
+            key, value = line.split(":", 1)
+            key = key.strip().lower()
+            if key in result:
+                result[key] = value.strip().strip('"').strip("'")
+    return result
+
+
+def find_skill_dirs(root) -> list:
+    """Папки со скиллами: сам `root`, затем на глубине 1, 2 и 3.
+
+    Глубина 2–3 нужна для архивов, где скиллы лежат в подпапке пакета:
+    `pack/skills/имя/SKILL.md` или `pack/skills/<категория>/имя/SKILL.md`.
+    Спускаемся только внутрь папок без SKILL.md — дальше скилл уже лежит.
+    """
+    root = Path(root)
+    found = []
+    if (root / "SKILL.md").is_file():
+        return [root]
+
+    def walk(folder: Path, depth: int):
+        try:
+            children = sorted(p for p in folder.iterdir() if p.is_dir())
+        except Exception:
+            return
+        for child in children:
+            if (child / "SKILL.md").is_file():
+                found.append(child)
+            elif depth < 3:
+                walk(child, depth + 1)
+
+    walk(root, 1)
+    return found
+
+
+def list_installed_skills(base=None, config=None, home=None) -> list:
+    base = Path(base) if base else skills_base_dir(config, home)
+    items = []
+    for path in find_skill_dirs(base):
+        manifest = skill_manifest(path / "SKILL.md")
+        items.append({
+            "name": manifest.get("name") or path.name,
+            "description": manifest.get("description") or "",
+            "path": path,
+        })
+    return items
+
+
+def _safe_folder_name(name: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", str(name or "")).strip("-.")
+    return cleaned or "skill"
+
+
+def _archive_member_paths(source, fmt) -> list:
+    """Имена файлов в архиве (ZIP или tar), без записи на диск."""
+    source = Path(source)
+    if fmt == "zip":
+        with zipfile.ZipFile(source) as archive:
+            return archive.namelist()
+    with tarfile.open(source, "r:*") as archive:
+        return [member.name for member in archive.getmembers()]
+
+
+def _check_archive_paths(source, fmt) -> None:
+    """Отказ от архива, который может расписаться вне целевой папки."""
+    bad = []
+    for name in _archive_member_paths(source, fmt):
+        text = str(name).replace("\\", "/")
+        parts = [p for p in text.split("/") if p not in ("", ".")]
+        if text.startswith("/") or re.match(r"^[A-Za-z]:", text) or ".." in parts:
+            bad.append(text)
+    if bad:
+        raise ValueError("архив отменён: подозрительные пути (%s)"
+                         % ", ".join(bad[:3]))
+
+
+def install_skills(source, base=None, overwrite=False, home=None) -> dict:
+    """Раскладывает скиллы из папки / ZIP / tar.gz в папку скиллов.
+
+    Архив сначала смотрится «вхолостую»: если в нём есть хоть один путь,
+    который может выйти за пределы папки (zip-slip), распаковка отменяется.
+    Существующие скиллы без `overwrite` не перезаписываются.
+    """
+    base = Path(base) if base else skills_base_dir(None, home)
+    source = Path(source)
+    if not source.exists():
+        raise FileNotFoundError("нет файла или папки: %s" % source)
+    report = {"installed": [], "skipped": [], "errors": [], "base": base}
+    with tempfile.TemporaryDirectory(prefix="ocm-skills-") as tmp:
+        stage = Path(tmp) / "src"
+        root = Path(tmp).resolve()
+        if source.is_dir():
+            shutil.copytree(source, stage)
+        elif source.suffix.lower() == ".zip":
+            _check_archive_paths(source, "zip")
+            shutil.unpack_archive(str(source), str(stage), "zip")
+            actual = Path(os.path.realpath(stage))
+            if not actual.is_relative_to(os.path.realpath(root)):
+                raise ValueError("архив распакован вне временной папки")
+        elif source.name.lower().endswith((".tar.gz", ".tgz", ".tar")):
+            fmt = "tar" if source.name.lower().endswith(".tar") else "gztar"
+            _check_archive_paths(source, fmt)
+            shutil.unpack_archive(str(source), str(stage), fmt)
+            actual = Path(os.path.realpath(stage))
+            if not actual.is_relative_to(os.path.realpath(root)):
+                raise ValueError("архив распакован вне временной папки")
+        else:
+            raise ValueError("нужна папка, .zip или .tar.gz")
+        for path in find_skill_dirs(stage):
+            resolved = path.resolve()
+            if root not in resolved.parents and resolved != root:
+                report["errors"].append("%s: путь вне папки" % path.name)
+                continue
+            manifest = skill_manifest(path / "SKILL.md")
+            name = _safe_folder_name(manifest.get("name") or path.name)
+            dest = base / name
+            if dest.exists() and not overwrite:
+                report["skipped"].append(name)
+                continue
+            try:
+                if dest.exists():
+                    shutil.rmtree(dest)
+                base.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(path, dest)
+                report["installed"].append(name)
+            except Exception as exc:
+                report["errors"].append("%s: %s" % (name, exc))
+    return report
+
+
+def remove_skill(name, base=None, home=None) -> bool:
+    """Удаляет один скилл из папки скиллов (только внутри неё)."""
+    base = Path(base) if base else skills_base_dir(None, home)
+    target = (base / _safe_folder_name(name)).resolve()
+    if base.resolve() not in target.parents:
+        return False
+    if not (target / "SKILL.md").is_file():
+        return False
+    shutil.rmtree(target)
+    return True
+
+
+def skills_config_entry(base=None, home=None):
+    """Какой ключ `skills` должен быть в конфиге, чтобы папка была видна."""
+    base = Path(base) if base else skills_base_dir(None, home)
+    return [str(base)]
+
+
+def mcp_report_lines(results) -> list:
+    lines = []
+    for res in results or []:
+        mark = "OK " if res.get("ok") else "ОШИБКА "
+        lines.append("%s%s\n    %s\n    %s" % (
+            mark, res.get("title") or res.get("agent"),
+            str(res.get("path") or "—"), res.get("message") or ""))
+    return lines
+
+
 def event_keysym(event):
     return str(getattr(event, "keysym", "") or "")
 
@@ -5280,6 +5868,371 @@ class AgentsDialog(tk.Toplevel):
             pass
 
 
+class ToolsDialog(tk.Toplevel):
+    """MCP-серверы и скиллы: что стоит сейчас и как поставить новое.
+
+    Пишет только в opencode.json `self.app.config_path` (и, по галочкам,
+    в файлы других агентов). Скиллы раскладываются в папку из ключа
+    `skills` (по умолчанию ~/.config/opencode/skills).
+    """
+
+    def __init__(self, app, home=None):
+        super().__init__(app.root)
+        self.app = app
+        self.home = home
+        self.title("MCP И СКИЛЛЫ")
+        self.geometry("960x780")
+        self.minsize(820, 640)
+        self.configure(bg=T.bg)
+        self.transient(app.root)
+        self.grab_set()
+
+        self.var_source = tk.StringVar(master=self)
+        self.var_overwrite = tk.BooleanVar(master=self, value=False)
+        self.field_vars = {}
+        self.server_checks = {}
+        self.agent_files = {}
+        self._result = None
+
+        try:
+            self.config = load_config(self.app.config_path)
+        except Exception:
+            self.config = {}
+        self._build()
+        try:
+            app.clipboard.bind_tree(self)
+        except Exception:
+            pass
+        self.bind("<Escape>", lambda e: self.destroy())
+
+    # --- UI ---------------------------------------------------------------
+    def _build(self):
+        head = tk.Frame(self, bg=T.bg)
+        head.pack(fill="x", padx=16, pady=(14, 2))
+        tk.Label(head, text="MCP И СКИЛЛЫ", bg=T.bg, fg=T.cyan,
+                 font=T.mono_title).pack(anchor="w")
+        tk.Label(head, text="Серверы инструментов и папки навыков для OpenCode и других агентов.",
+                 bg=T.bg, fg=T.ink_dim, font=T.mono_small).pack(anchor="w", pady=(2, 0))
+        ScanStrip(self, color=T.cyan).pack(fill="x", padx=16, pady=(6, 6))
+
+        body = tk.Frame(self, bg=T.bg)
+        body.pack(fill="both", expand=True, padx=16)
+        body.columnconfigure(0, weight=1)
+        body.columnconfigure(1, weight=1)
+        body.rowconfigure(0, weight=1)
+
+        self._build_mcp_panel(body)
+        self._build_skills_panel(body)
+
+        rep_panel = RoundedPanel(self, radius=12, fill=T.bg_panel, outline=T.line,
+                                 thickness=1, bg=T.bg, height=118)
+        rep_panel.pack(fill="x", padx=16, pady=(6, 0))
+        rep_box = rep_panel.inner
+        self.txt_report = tk.Text(rep_box, height=6, bg=T.bg_panel, fg=T.cyan_soft,
+                                  font=T.mono_small, relief="flat", bd=0, wrap="word",
+                                  highlightthickness=0, insertbackground=T.cyan)
+        rsb = ttk.Scrollbar(rep_box, orient="vertical", command=self.txt_report.yview)
+        self.txt_report.configure(yscrollcommand=rsb.set)
+        self.txt_report.pack(side="left", fill="both", expand=True)
+        rsb.pack(side="right", fill="y")
+        self.txt_report.insert("1.0", "Выберите серверы или папку скиллов, затем нажмите кнопку.")
+        self.txt_report.configure(state="disabled")
+
+        foot = tk.Frame(self, bg=T.bg)
+        foot.pack(fill="x", padx=16, pady=(8, 12), side="bottom")
+        ttk.Button(foot, text="ЗАКРЫТЬ", command=self.destroy).pack(side="right", padx=4)
+        self.btn_install = ttk.Button(foot, text="УСТАНОВИТЬ ВЫБРАННОЕ",
+                                      style="Accent.TButton", command=self._install)
+        self.btn_install.pack(side="right", padx=4)
+
+    def _build_mcp_panel(self, body):
+        panel = RoundedPanel(body, radius=16, fill=T.bg_panel, outline=T.cyan_dim,
+                             thickness=1, bg=T.bg)
+        panel.grid(row=0, column=0, sticky="nsew", padx=(0, 6), pady=2)
+        box = panel.inner
+        title = tk.Frame(box, bg=T.bg_panel)
+        title.pack(fill="x", padx=10, pady=(8, 4))
+        tk.Label(title, text="MCP-СЕРВЕРЫ", bg=T.bg_panel, fg=T.cyan,
+                 font=T.mono_title).pack(side="left")
+
+        installed = mcp_servers_from_config(self.config)
+        self.installed_label = tk.Label(
+            box, text="в конфиге сейчас: %s" % (", ".join(sorted(installed)) or "нет"),
+            bg=T.bg_panel, fg=T.green, font=T.mono_small, anchor="w", justify="left",
+            wraplength=380)
+        self.installed_label.pack(fill="x", padx=10)
+
+        canvas = tk.Canvas(box, bg=T.bg_panel, highlightthickness=0, height=420)
+        sb = ttk.Scrollbar(box, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=sb.set)
+        inner = tk.Frame(canvas, bg=T.bg_panel)
+        window = canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>",
+                   lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>",
+                    lambda e: canvas.itemconfigure(window, width=e.width))
+        canvas.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=(6, 8))
+        sb.pack(side="right", fill="y", padx=(0, 10), pady=(6, 8))
+        canvas.bind("<Enter>", lambda _=None: canvas.bind_all(
+            "<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)),
+                                                         "units")))
+        canvas.bind("<Leave>", lambda _=None: canvas.unbind_all("<MouseWheel>"))
+
+        for item in MCP_CATALOG:
+            row = tk.Frame(inner, bg=T.bg_panel)
+            row.pack(fill="x", pady=(4, 0))
+            var = tk.BooleanVar(master=self, value=(item["id"] in installed))
+            self.server_checks[item["id"]] = var
+            tk.Checkbutton(row, text=item["title"], variable=var, bg=T.bg_panel, fg=T.ink,
+                           selectcolor=T.bg_input, activebackground=T.bg_panel,
+                           activeforeground=T.cyan, font=T.mono_small, bd=0, anchor="w",
+                           highlightthickness=0).pack(side="left", anchor="w")
+            mark = "●" if item["id"] in installed else "○"
+            tk.Label(row, text=mark, bg=T.bg_panel,
+                     fg=T.green if item["id"] in installed else T.cyan_dim,
+                     font=T.mono_small).pack(side="right", padx=(4, 2))
+            tk.Label(inner, text=item["description"], bg=T.bg_panel, fg=T.ink_dim,
+                     font=T.mono_small, anchor="w", justify="left",
+                     wraplength=360).pack(fill="x", padx=(24, 4))
+            for field in item.get("fields") or ():
+                field_row = tk.Frame(inner, bg=T.bg_panel)
+                field_row.pack(fill="x", padx=(24, 4), pady=(2, 0))
+                tk.Label(field_row, text=field["label"], bg=T.bg_panel, fg=T.cyan_soft,
+                         font=T.mono_small, width=19, anchor="w").pack(side="left")
+                var_field = tk.StringVar(master=self)
+                entry = ttk.Entry(field_row, textvariable=var_field, font=T.mono,
+                                  width=26)
+                if field.get("secret"):
+                    entry.configure(show="*")
+                entry.pack(side="left", fill="x", expand=True)
+                self.field_vars[(item["id"], field["key"])] = var_field
+            tk.Frame(inner, bg=T.line, height=1).pack(fill="x", padx=4, pady=(6, 0))
+
+        tk.Label(box, text="Дополнительно записать в файлы других агентов:", bg=T.bg_panel,
+                 fg=T.ink_dim, font=T.mono_small, anchor="w", justify="left",
+                 wraplength=380).pack(fill="x", padx=10, pady=(0, 2))
+        for agent_id, title_text, path_fn in MCP_AGENT_FILES:
+            var = tk.BooleanVar(master=self, value=False)
+            self.agent_files[agent_id] = var
+            row = tk.Frame(box, bg=T.bg_panel)
+            row.pack(fill="x", padx=10, anchor="w")
+            tk.Checkbutton(row, text=str(path_fn(self.home)), variable=var,
+                           bg=T.bg_panel, fg=T.cyan_soft, selectcolor=T.bg_input,
+                           activebackground=T.bg_panel, activeforeground=T.cyan,
+                           font=T.mono_small, bd=0, anchor="w",
+                           highlightthickness=0).pack(side="left", anchor="w")
+
+    def _build_skills_panel(self, body):
+        panel = RoundedPanel(body, radius=16, fill=T.bg_panel, outline=T.cyan_dim,
+                             thickness=1, bg=T.bg)
+        panel.grid(row=0, column=1, sticky="nsew", padx=(6, 0), pady=2)
+        box = panel.inner
+        title = tk.Frame(box, bg=T.bg_panel)
+        title.pack(fill="x", padx=10, pady=(8, 4))
+        tk.Label(title, text="СКИЛЛЫ", bg=T.bg_panel, fg=T.cyan,
+                 font=T.mono_title).pack(side="left")
+        base = skills_base_dir(self.config, self.home)
+        self.skills_base = base
+        tk.Label(box, text="папка: %s" % base, bg=T.bg_panel, fg=T.green,
+                 font=T.mono_small, anchor="w", justify="left",
+                 wraplength=380).pack(fill="x", padx=10)
+
+        row = tk.Frame(box, bg=T.bg_panel)
+        row.pack(fill="x", padx=10, pady=(6, 2))
+        ttk.Entry(row, textvariable=self.var_source, font=T.mono,
+                  width=26).pack(side="left", fill="x", expand=True)
+        ttk.Button(row, text="…", width=3,
+                   command=self._pick_source).pack(side="left", padx=2)
+        ttk.Checkbutton(row, text="перезаписывать", variable=self.var_overwrite,
+                        command=self._update_counts).pack(side="left", padx=4)
+        ttk.Button(box, text="УСТАНОВИТЬ СКИЛЛЫ ИЗ ФАЙЛА/ПАПКИ",
+                   style="Accent.TButton",
+                   command=self._install_skills).pack(fill="x", padx=10, pady=(4, 4))
+        ttk.Button(box, text="УДАЛИТЬ ВЫБРАННЫЕ СКИЛЛЫ",
+                   command=self._remove_skills).pack(fill="x", padx=10, pady=(0, 6))
+
+        self.skill_vars = {}
+        canvas = tk.Canvas(box, bg=T.bg_panel, highlightthickness=0)
+        sb = ttk.Scrollbar(box, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=sb.set)
+        inner = tk.Frame(canvas, bg=T.bg_panel)
+        window = canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>",
+                   lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>",
+                    lambda e: canvas.itemconfigure(window, width=e.width))
+        canvas.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=(0, 8))
+        sb.pack(side="right", fill="y", padx=(0, 10), pady=(0, 8))
+        self._skill_inner = inner
+        self._render_skills()
+
+    def _skill_summary(self, count):
+        if not count:
+            return "не установлено ни одного навыка"
+        return "установлено навыков: %d" % count
+
+    def _render_skills(self):
+        for child in list(self._skill_inner.winfo_children()):
+            child.destroy()
+        self.skill_vars = {}
+        items = list_installed_skills(self.skills_base)
+        tk.Label(self._skill_inner, text=self._skill_summary(len(items)),
+                 bg=T.bg_panel, fg=T.green, font=T.mono_small,
+                 anchor="w").pack(fill="x", pady=(0, 4))
+        for item in items:
+            var = tk.BooleanVar(master=self, value=False)
+            self.skill_vars[item["name"]] = var
+            tk.Checkbutton(self._skill_inner, text=item["name"], variable=var,
+                           bg=T.bg_panel, fg=T.ink, selectcolor=T.bg_input,
+                           activebackground=T.bg_panel, activeforeground=T.cyan,
+                           font=T.mono_small, bd=0, anchor="w",
+                           highlightthickness=0).pack(fill="x", padx=4, pady=(2, 0))
+            description = (item.get("description") or "").strip()
+            if description:
+                tk.Label(self._skill_inner, text=description[:220], bg=T.bg_panel,
+                         fg=T.ink_dim, font=T.mono_small, anchor="w", justify="left",
+                         wraplength=360).pack(fill="x", padx=(24, 4))
+
+    def _pick_source(self):
+        choice = messagebox.askyesno(
+            "Источник скиллов",
+            "Да — выбрать папку со скиллами.\nНет — выбрать архив .zip / .tar.gz (/ .tgz).",
+            parent=self)
+        if choice:
+            path = filedialog.askdirectory(parent=self, title="Папка со скиллами")
+        else:
+            path = filedialog.askopenfilename(
+                parent=self, title="Архив скиллов",
+                filetypes=[("Архивы", "*.zip *.tar.gz *.tgz *.tar"),
+                           ("Все файлы", "*.*")])
+        if path:
+            self.var_source.set(path)
+
+    def _update_counts(self):
+        pass
+
+    # --- действия ---------------------------------------------------------
+    def _selected_servers(self):
+        servers = {}
+        errors = []
+        for item in MCP_CATALOG:
+            if not self.server_checks[item["id"]].get():
+                continue
+            values = {}
+            for field in item.get("fields") or ():
+                var = self.field_vars.get((item["id"], field["key"]))
+                values[field["key"]] = var.get() if var is not None else ""
+            try:
+                servers[item["id"]] = mcp_server_entry(item, values)
+            except ValueError as exc:
+                errors.append("%s: %s" % (item["id"], exc))
+        return servers, errors
+
+    def _install(self):
+        servers, errors = self._selected_servers()
+        if errors:
+            messagebox.showerror("MCP", "\n".join(errors), parent=self)
+            return
+        if not servers:
+            messagebox.showinfo("MCP", "Отметьте хотя бы один сервер", parent=self)
+            return
+        agents = [a for a, v in self.agent_files.items() if v.get()]
+        try:
+            config = load_config(self.app.config_path)
+        except Exception as exc:
+            messagebox.showerror("MCP", "Конфиг не разбирается: %s" % exc, parent=self)
+            return
+        self.btn_install.configure(state="disabled")
+        try:
+            applied = apply_mcp_servers(config, servers)
+            backup = save_config(self.app.config_path, applied["config"])
+            results = [{
+                "agent": "opencode", "title": "OpenCode (этот конфиг)", "ok": True,
+                "path": self.app.config_path, "backup": backup,
+                "message": "; ".join("%s: %s" % (name, ", ".join(changes) or "без изменений")
+                                     for name, changes in applied["changes"].items()),
+            }]
+            if agents:
+                results += install_mcp_servers(
+                    servers, config_path=self.app.config_path, home=self.home,
+                    mcp_agent_ids=agents)
+            self.app.config = applied["config"]
+        except Exception as exc:
+            messagebox.showerror("MCP", "Не удалось записать: %s" % exc, parent=self)
+            return
+        finally:
+            try:
+                self.btn_install.configure(state="normal")
+            except Exception:
+                pass
+        lines = ["MCP-СЕРВЕРЫ ЗАПИСАНЫ:%s" % ("" if not errors else " с ошибками")]
+        lines.append("")
+        lines += mcp_report_lines(results)
+        lines.append("")
+        lines.append("Перезапустите OpenCode, чтобы серверы поднялись.")
+        self._report("\n".join(lines))
+        self.config = load_config(self.app.config_path)
+        installed = mcp_servers_from_config(self.config)
+        self.installed_label.configure(
+            text="в конфиге сейчас: %s" % (", ".join(sorted(installed)) or "нет"))
+        ok = sum(1 for r in results if r.get("ok"))
+        self.app._set_status("MCP: ЗАПИСАНО %d ИЗ %d" % (ok, len(results)))
+        self._result = results
+
+    def _install_skills(self):
+        source = (self.var_source.get() or "").strip()
+        if not source:
+            messagebox.showinfo("Скиллы", "Укажите папку или архив со скиллами",
+                                parent=self)
+            return
+        try:
+            report = install_skills(source, base=self.skills_base,
+                                    overwrite=self.var_overwrite.get(), home=self.home)
+        except Exception as exc:
+            messagebox.showerror("Скиллы", "Не удалось установить: %s" % exc, parent=self)
+            return
+        lines = ["СКИЛЛЫ"]
+        lines.append("папка: %s" % report["base"])
+        lines.append("установлено: %s" % (", ".join(report["installed"]) or "—"))
+        if report["skipped"]:
+            lines.append("пропущено (уже есть, без «перезаписывать»): %s"
+                         % ", ".join(report["skipped"]))
+        if report["errors"]:
+            lines.append("ошибки: %s" % "; ".join(report["errors"]))
+        lines.append("")
+        lines.append("Чтобы OpenCode видел папку, в opencode.json: "
+                     "\"skills\": %s" % json.dumps(skills_config_entry(
+                         self.skills_base), ensure_ascii=False))
+        self._report("\n".join(lines))
+        self._render_skills()
+        self.app._set_status("СКИЛЛЫ: УСТАНОВЛЕНО %d" % len(report["installed"]))
+        self._result = report
+
+    def _remove_skills(self):
+        selected = [name for name, var in self.skill_vars.items() if var.get()]
+        if not selected:
+            messagebox.showinfo("Скиллы", "Отметьте, что удалить", parent=self)
+            return
+        if not messagebox.askyesno(
+                "Скиллы", "Удалить безвозвратно: %s?" % ", ".join(selected), parent=self):
+            return
+        removed = [name for name in selected
+                   if remove_skill(name, base=self.skills_base, home=self.home)]
+        self._report("СКИЛЛЫ\nудалено: %s\nосталось: %d" % (
+            ", ".join(removed) or "—", len(list_installed_skills(self.skills_base))))
+        self._render_skills()
+
+    def _report(self, text):
+        try:
+            self.txt_report.configure(state="normal")
+            self.txt_report.delete("1.0", "end")
+            self.txt_report.insert("1.0", text)
+            self.txt_report.configure(state="disabled")
+            self.txt_report.see("1.0")
+        except Exception:
+            pass
+
+
 class App:
     def __init__(self):
         self.root_ready = True
@@ -5508,6 +6461,8 @@ class App:
         ttk.Button(row2, text="ИМПОРТ В АГЕНТОВ…",
                    style="Accent.TButton",
                    command=self.open_agents_dialog).pack(side="left", padx=(12, 3))
+        ttk.Button(row2, text="MCP И СКИЛЛЫ…",
+                   command=self.open_tools_dialog).pack(side="left", padx=3)
         self.btn_aos = ttk.Button(row2, text="AOS: ВЫКЛ",
                                   command=self.toggle_aos)
         self.btn_aos.pack(side="left", padx=(12, 3))
@@ -6271,6 +7226,11 @@ class App:
                                 parent=self.root)
             return
         dlg = AgentsDialog(self)
+        self.root.wait_window(dlg)
+
+    def open_tools_dialog(self):
+        """Окно MCP-серверов и скиллов."""
+        dlg = ToolsDialog(self)
         self.root.wait_window(dlg)
 
     def run(self):

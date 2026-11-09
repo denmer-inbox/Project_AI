@@ -189,6 +189,52 @@ OK  DeepSeek Harness (~/.dsh)        патч-записей: 15
 audio/reasoning, перечитывание); живой `opencode.json` не менялся
 (`E473D1F95E032EE0`).
 
+### MCP-серверы и скиллы (10.11.2026)
+
+Новая кнопка в главном окне — **«MCP И СКИЛЛЫ…»** (окно `ToolsDialog`).
+
+**Каталог MCP** (`MCP_CATALOG`) — 5 серверов:
+
+| id | тип | что запускает |
+|---|---|---|
+| `rea` | local | `npx -y rea-agents@6.7.0 mcp` (поля `GHIDRA_INSTALL_DIR`, `JAVA_HOME`) |
+| `filesystem` | local | `@modelcontextprotocol/server-filesystem@2025.7.1` + папка аргументом |
+| `memory` | local | `@modelcontextprotocol/server-memory@2025.7.1` |
+| `sequential-thinking` | local | `@modelcontextprotocol/server-sequential-thinking@2025.7.1` |
+| `github` | remote | `https://api.githubcopilot.com/mcp/` (токен `GITHUB_PAT`) |
+
+**Формат записи.** Официальная схема `https://opencode.ai/config.json` разрешает
+в `mcp` только `timeout` и `servers`, поэтому серверы пишутся в
+**`mcp.servers.<id>`**, а включённость — ключом **`disabled`** (не `enabled`).
+Старые конфиги хранят серверы прямо в `mcp.<id>` и `enabled: true` — при
+применении такие записи переносятся в `mcp.servers` и `enabled` убирается.
+Проверено валидатором схемы: 5 серверов каталога и миграция legacy-записи дают
+**0 ошибок**.
+
+**Секреты не попадают в файл.** Удалённый сервер пишет в заголовок ссылку
+`Authorization: Bearer {env:GITHUB_PAT}`, локальные — `environment[ИМЯ] =
+"{env:ИМЯ}"`; в `opencode.json` остаётся только имя переменной окружения.
+Поле «папка» сервера filesystem (`path_args`) уходит аргументом команды и в
+`environment` не дублируется.
+
+**Другие агенты.** По галочкам те же серверы пишутся в `mcpServers` у Claude
+Code (`~/.claude/settings.json`), Cline (`~/.cline/data/settings/mcp_settings.json`),
+VS Code (`mcp.json`) и блоком `[mcp_servers.<id>]` в `~/.codex/config.toml`
+(старый блок того же id удаляется, дублей TOML не даёт).
+
+**Скиллы.** Принимается папка, `.zip`, `.tar.gz`/`.tgz`/`.tar`; скиллы ищутся
+до глубины 3 (`pack/skills/<имя>/SKILL.md` тоже находится). Архив проверяется
+до распаковки: пути с `..`, абсолютные и с буквой диска (`C:`) — отказ
+(zip-slip). Существующие скиллы без галочки «перезаписывать» не трогаются.
+Папка берётся из ключа `skills` конфига, иначе `~/.config/opencode/skills`.
+Удаление — только внутри папки скиллов.
+
+**Проверка:** `tests/test_provider_manager_mcp.py` — 18 тестов (каталог, запись
+в конфиг, миграция, файлы агентов, ZIP/tar/tar.gz, zip-slip, удаление); вместе с
+capabilities/export/agents/paste — **96 passed**; Tk-прогон `ToolsDialog`
+(rea+memory → `mcp.servers`, установка скилла из папки) проходит; живой
+`opencode.json` не менялся (`E473D1F95E032EE0`).
+
 ---
 
 ## 5. Состояние рабочего конфига OpenCode
@@ -199,7 +245,9 @@ SHA-256 (первые 16): `E473D1F95E032EE0`, 16299 байт.
 - провайдеры: `deepseek-4-flash`, `aikeysforyou.com`, `deepseek-v4-flash`, `DEEPSEEK_FLASH`
 - моделей: 50, скрытых (`disabled`): **0**
 - `model`: `DEEPSEEK_FLASH/deepseek-v4.1-flash-1017`
-- `mcp.rea`, `agent.plan`, `skills` — на месте
+- `mcp.servers.rea`, `agent.plan`, `skills` — на месте (сервер лежит в
+  `mcp.rea` — это старая форма; менеджер при первом применении перенесёт
+  запись в `mcp.servers.rea` и заменит `enabled` на `disabled: false`)
 
 Эталонные снимки: `~/.config/opencode/backups/opencode.json.20261106-001620-567.bak`
 и `opencode.json.before-model-restore-20261106-003931`.
