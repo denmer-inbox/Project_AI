@@ -120,6 +120,93 @@ db28b62 feat: индикатор ● как глиф, автозагрузка �
 
 ---
 
+### 3.5 Исправления 10.11.2026: ключи и выбор моделей
+
+**Ключи.** Причина «API key rejected» на другой машине: менеджер писал в
+`opencode.json` ссылку `{env:OPENCODE_..._API_KEY}`, а значение держал в
+`os.environ` своего процесса. OpenCode — отдельный процесс и переменную не
+видит; на другой машине её нет вовсе, поэтому заголовок `Authorization` не
+отправлялся. Проверено на живом `opencode-cli.exe` с mock-сервером:
+`settings.apiKey` читают все пакеты (`@ai-sdk/openai` → Bearer,
+`@ai-sdk/anthropic` → `x-api-key`).
+
+Что изменено:
+- `placeholder_env_name`, `resolve_api_key`, `usable_api_key`,
+  `_clean_provider_raw`, `_strip_generated_env`;
+- `profiles_from_config` разрешает `{env:...}` из окружения (иначе ключ
+  отсутствует) и чистит `_raw`;
+- `build_provider`/`merge_profiles_into_config` пишут реальный ключ, больше не
+  пишут `env` и не трогают `os.environ`; пустой ключ = поля нет;
+- `migrate_provider_keys` разрешает/удаляет старую заглушку, `sk-cvc-*`
+  по-прежнему переводит на `openai-compatible`, сохраняя ключ;
+- экспорт/импорт не содержат `{env:...}`, старые экспорты восстанавливают ключ
+  из `raw.settings.apiKey`;
+- писатели Cline/Continue/Codex/Claude/Aider/DSH и MCP-секреты пишут только
+  реальные значения; при пустом ключе поле пропускается;
+- UI: диалог не предзаполняет поле заглушкой, панель показывает
+  «не задан: ссылка {env:NAME}», сохранение предупреждает о заглушке;
+- `apply_profiles` сохраняет провайдеров, появившихся в файле после загрузки
+  (удаление загруженных профилей работает как раньше).
+
+**Выбор моделей.** `SmartCheck._on_click` считал `0x0008` вторым Ctrl. На
+Windows это NumLock, поэтому при включённом NumLock обычный клик вызывал
+`toggle_all()` и отмечал все модели. Оставлены только Shift (`0x1`) и Ctrl
+(`0x4`). Дополнительно:
+- диалог ставит галочки только на `profile["models"]`, а не на все
+  `known_models` (раньше при открытии отмечались и `disabled`);
+- «СОХРАНИТЬ» без изменений больше не включает отключённые модели;
+- повторное «ПОЛУЧИТЬ СПИСОК МОДЕЛЕЙ» не включает всё, если пользователь снял
+  все галочки; только первый запрос нового профиля отмечает всё;
+- счётчик обновляется в конце рендера, trace на возможностях не копится,
+  `discover_models` дедуплицирует id.
+
+Тесты: `tests/test_provider_manager_keys.py` (21),
+`tests/test_provider_manager_models.py` (7); прогон профильных файлов —
+125 passed.
+
+### 3.6 Исправления 11.11.2026: писатели конфигов всех агентов
+
+Аудит на изолированном HOME: каждый писатель запускался дважды, результат
+проверялся реальными парсерами (`json`, `tomllib`, PyYAML, `jsonschema`) и
+правилами zod из исходников Cline/Codex. Найдено и исправлено:
+
+- **Cline.** `settings.provider` больше не `openai-compatible` (встроенный ID):
+  Cline отбрасывает такие записи в `registerProviderSettingsProvider`.
+  Свой ID — `ocm-<sanitized id>`; он же ключ в `providers.json`/`models.json`
+  и в `lastUsedProvider`. `baseUrl` нормализуется, `updatedAt` — UTC с `Z`
+  (zod `.datetime()`), `models.json` содержит `provider.{name,baseUrl}`,
+  старые записи под «сырым» id удаляются, повторная запись не меняет
+  `updatedAt`.
+- **Codex.** Секции `[model_providers.<id>]` заменяются на месте (раньше
+  копились пустые строки и менялся порядок). Ключ пишется только в
+  `experimental_bearer_token`: `env_key` Codex читает строго и падает с
+  `EnvVarError`, если переменной нет в окружении агента. `base_url`
+  нормализуется; без ключа полей авторизации нет.
+- **Claude/Aider.** При переносе профиля без ключа удаляются старые
+  `ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_API_KEY` и `openai-api-key`, иначе агент
+  получал токен от прошлой синхронизации.
+- **DSH.** `apiKeyEnv` пишется только при наличии ключа; для профиля без
+  ключа удаляется старый `refs.<ENV>`; `baseURL` нормализуется.
+- **VS Code.** `_patch_vscode_settings` удаляет все старые вхождения
+  `opencodeLM.configPath` (раньше каждый запуск добавлял дубль, и последним
+  мог остаться старый путь) и вставляет один ключ, сохраняя JSONC-комментарии.
+- **Continue.** `apiBase` нормализуется; записи сопоставляются по тройке
+  (provider, apiBase, model), поэтому пользовательская модель на том же URL
+  больше не удаляется.
+- **OpenCode.** `merge_profiles_into_config` терял имена и `disabled`-модели
+  при первом переносе: `merged` ссылался на пустой словарь вместо копии
+  raw-моделей. Исправлено.
+- **Коэффициенты.** `providers.<id>._coefficient` запрещён схемой OpenCode
+  (`additionalProperties: false`) — вынесены в `provider_coefficients.json`
+  рядом с `opencode.json`.
+
+Проверка: 12/12 сценариев аудита идемпотентны, ошибок схемы OpenCode 0,
+TOML парсится, Cline без ошибок, дублей в VS Code нет; живой конфиг не
+изменялся. Профильные тесты: 154 passed, 2 skipped
+(`tests/test_provider_manager_writers.py` — 20 новых).
+
+---
+
 ## 4. Проверено и работает
 
 - 61 тест проходит (`tests/test_provider_manager_agents.py`,

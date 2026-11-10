@@ -20,6 +20,7 @@ OpenCode Provider Manager
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import queue
@@ -36,7 +37,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 try:
@@ -664,6 +665,7 @@ def discover_models(base_url: str, api_key: str) -> list:
             raise RuntimeError("HTTP %s при запросе %s" % (status, url))
         items = data.get("data") or data.get("models") or [] if isinstance(data, dict) else data
         models = []
+        seen = set()
         for item in items or []:
             if isinstance(item, str):
                 item = {"id": item}
@@ -672,9 +674,15 @@ def discover_models(base_url: str, api_key: str) -> list:
             mid = item.get("id") or item.get("name")
             if not mid:
                 continue
+            mid = str(mid)
+            if mid in seen:
+                # дубль id в ответе провайдера давал два чекбокса на одну
+                # BooleanVar — клик «переключал» сразу несколько строк
+                continue
+            seen.add(mid)
             models.append({
-                "id": str(mid),
-                "display": item.get("display_name") or item.get("name") or str(mid),
+                "id": mid,
+                "display": item.get("display_name") or item.get("name") or mid,
                 "context": item.get("context_window") or item.get("contextWindow")
                 or item.get("context_length") or item.get("max_context_tokens"),
                 "output": item.get("max_output_tokens") or item.get("max_tokens"),
@@ -692,11 +700,82 @@ def discover_models(base_url: str, api_key: str) -> list:
 # Профили <-> конфиг
 # ==========================================================================
 
-def profiles_from_config(config: dict) -> list:
+#: Ссылка на переменную окружения, а не сам ключ. OpenCode понимает такой
+#: синтаксис, остальные агенты — нет. В файлы пишем только реальное значение,
+#: а ссылку без значения считаем «ключ не задан».
+PLACEHOLDER_ENV_RE = re.compile(r"^\{env:([A-Za-z_][A-Za-z0-9_]*)\}$")
+
+
+def placeholder_env_name(value) -> str:
+    """Имя переменной, если `value` — ссылка `{env:NAME}`, иначе ""."""
+    if not isinstance(value, str):
+        return ""
+    match = PLACEHOLDER_ENV_RE.match(value.strip())
+    return match.group(1) if match else ""
+
+
+def resolve_api_key(value) -> str:
+    """Реальный ключ из значения профиля/конфига.
+
+    Ссылка `{env:NAME}` разрешается только если переменная задана в этом
+    процессе; иначе ключа нет. Литерал `{env:...}` не возвращается никогда:
+    его нельзя ни писать в файлы, ни отправлять в сеть.
+    """
+    if not isinstance(value, str):
+        return ""
+    text = value.strip()
+    name = placeholder_env_name(text)
+    if name:
+        return str(os.environ.get(name) or "").strip()
+    return text
+
+
+def usable_api_key(profile) -> str:
+    """Ключ профиля, пригодный для записи в файл или заголовок запроса."""
+    if isinstance(profile, dict):
+        return resolve_api_key(profile.get("api_key"))
+    return resolve_api_key(profile)
+
+
+def _strip_generated_env(proxy: dict, pid: str) -> None:
+    """Убирает `env`, который менеджер сам добавлял для ключа.
+
+    Чужие переменные (добавленные пользователем) не трогаем: они могут быть
+    нужны провайдеру для других настроек.
+    """
+    env = proxy.get("env")
+    if not isinstance(env, list):
+        return
+    generated = _env_key(pid or "")
+    kept = [name for name in env if name != generated]
+    if kept:
+        proxy["env"] = kept
+    else:
+        proxy.pop("env", None)
+
+
+def _clean_provider_raw(raw, pid, key="") -> dict:
+    """Копия «сырого» провайдера без ссылок `{env:...}` на ключ."""
+    raw = copy.deepcopy(raw) if isinstance(raw, dict) else {}
+    settings = raw.get("settings")
+    if isinstance(settings, dict):
+        if placeholder_env_name(settings.get("apiKey")):
+            if key:
+                settings["apiKey"] = key
+            else:
+                settings.pop("apiKey", None)
+        if not settings:
+            raw.pop("settings", None)
+    _strip_generated_env(raw, pid or "")
+    return raw
+
+
+def profiles_from_config(config: dict, coefficients=None) -> list:
     providers = config.get("providers")
     result = []
     if not isinstance(providers, dict):
         return result
+    coefficients = coefficients if isinstance(coefficients, dict) else {}
     for pid, proxy in providers.items():
         proxy = proxy if isinstance(proxy, dict) else {}
         settings = proxy.get("settings") if isinstance(proxy.get("settings"), dict) else {}
@@ -713,19 +792,23 @@ def profiles_from_config(config: dict) -> list:
         for mid in known:
             if mid not in selected:
                 continue
+        placeholder = placeholder_env_name(settings.get("apiKey"))
+        api_key = resolve_api_key(settings.get("apiKey"))
+        coefficient = str(coefficients.get(pid) or proxy.get("_coefficient") or "")
         result.append({
             "id": pid,
             "display_name": proxy.get("name") or pid,
-            "coefficient": str(proxy.get("_coefficient") or ""),
+            "coefficient": coefficient,
             "base_url": settings.get("baseURL") or "",
-            "api_key": settings.get("apiKey") or "",
+            "api_key": api_key,
+            "key_placeholder": placeholder,
             "package": proxy.get("package") or PACKAGES[0],
             "models": selected,
             "known_models": known,
             "model_capabilities": capabilities,
             "extra_settings": {k: v for k, v in settings.items()
                                if k not in ("baseURL", "apiKey")},
-            "_raw": copy.deepcopy(proxy),
+            "_raw": _clean_provider_raw(proxy, pid, api_key),
         })
     return result
 
@@ -921,23 +1004,76 @@ def model_spec(model: dict, existing=None, flags=None) -> dict:
     return _apply_capabilities(spec, flags)
 
 
-def _strip_coef(obj):
-    """Убирает служебные поля (коэффициент) из объекта, уходящего в конфиг."""
-    if isinstance(obj, dict):
-        return {k: _strip_coef(v) for k, v in obj.items() if not k.startswith("_")}
-    if isinstance(obj, list):
-        return [_strip_coef(v) for v in obj]
-    return obj
+#: Коэффициент пакета (сколько токенов списывается за один) — служебное
+#: значение менеджера, а не OpenCode. Схема конфига запрещает лишние поля
+#: в `providers.<id>` (`additionalProperties: false`), поэтому держим их в
+#: отдельном файле рядом с opencode.json и не ломаем валидацию.
+COEFFICIENTS_FILE_NAME = "provider_coefficients.json"
 
 
-def read_coefficient(config: dict, pid: str) -> str:
-    """Коэффициент храним в самом конфиге (providers.<id>._coefficient) — служебное поле."""
-    providers = config.get("providers") or {}
-    proxy = providers.get(pid) or {}
-    val = proxy.get("_coefficient")
-    if val in (None, ""):
-        return ""
-    return str(val)
+def coefficients_path(config_path) -> Path:
+    return Path(config_path).parent / COEFFICIENTS_FILE_NAME
+
+
+def load_coefficients(config_path) -> dict:
+    """Коэффициенты из файла рядом с конфигом: {provider_id: "1.25"}."""
+    path = coefficients_path(config_path)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    result = {}
+    for key, value in data.items():
+        text = str(value or "").strip()
+        if text:
+            result[str(key)] = text
+    return result
+
+
+def save_coefficients(config_path, coefficients) -> Path | None:
+    """Пишет файл коэффициентов; если значений нет — удаляет старый."""
+    path = coefficients_path(config_path)
+    clean = {str(k): str(v).strip()
+             for k, v in (coefficients or {}).items() if str(v or "").strip()}
+    if not clean:
+        try:
+            if path.exists():
+                path.unlink()
+        except OSError:
+            pass
+        return None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(clean, indent=2, ensure_ascii=False,
+                              sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+    return path
+
+
+def coefficients_map(config: dict) -> dict:
+    """Собирает `_coefficient` из старого конфига (обратная совместимость)."""
+    result = {}
+    providers = config.get("providers") if isinstance(config, dict) else None
+    if isinstance(providers, dict):
+        for pid, proxy in providers.items():
+            if not isinstance(proxy, dict):
+                continue
+            text = str(proxy.get("_coefficient") or "").strip()
+            if text:
+                result[str(pid)] = text
+    return result
+
+
+def strip_coefficients(config: dict) -> dict:
+    """Копия конфига без служебных `_coefficient` в провайдерах."""
+    new = copy.deepcopy(config)
+    providers = new.get("providers") if isinstance(new.get("providers"), dict) else {}
+    for proxy in providers.values():
+        if isinstance(proxy, dict):
+            proxy.pop("_coefficient", None)
+    return new
 
 
 def is_chat_completions_package(package) -> bool:
@@ -956,26 +1092,22 @@ def build_provider(profile: dict) -> dict:
     base = normalize_base_url(profile.get("base_url", ""))
     if base:
         settings["baseURL"] = base
-    if profile.get("api_key"):
-        settings["apiKey"] = profile["api_key"]
+    key = usable_api_key(profile)
+    if key:
+        settings["apiKey"] = key
     for k, v in (profile.get("extra_settings") or {}).items():
+        if k == "apiKey":
+            continue
         settings[k] = v
     proxy = copy.deepcopy(profile.get("_raw") or {})
-    coef = str(profile.get("coefficient") or "").strip()
-    if coef:
-        proxy["_coefficient"] = coef
-    else:
-        proxy.pop("_coefficient", None)
+    # `settings.apiKey` пересобираем сами: в старом конфиге там могла остаться
+    # ссылка {env:...}, значение которой менеджер не сохранял.
+    _strip_generated_env(proxy, profile.get("id") or "")
+    # коэффициент живёт в отдельном файле: схема OpenCode запрещает поля
+    # с префиксом `_` внутри providers.<id>
+    proxy.pop("_coefficient", None)
     proxy["name"] = profile.get("display_name") or profile.get("id")
     proxy["package"] = profile.get("package") or PACKAGES[0]
-    if not is_chat_completions_package(proxy["package"]):
-        # Только openai-compatible отправляет settings.apiKey в запрос. Другие
-        # пакеты (openai, anthropic, google) берут ключ из окружения — иначе
-        # OpenCode отвечает «API key is required». Отдаём ключ через env.
-        env_name = _env_key(profile.get("id") or "")
-        proxy["env"] = [env_name]
-        settings["apiKey"] = "{env:%s}" % env_name
-        os.environ[env_name] = profile["api_key"]
     if settings:
         proxy["settings"] = settings
     else:
@@ -1000,10 +1132,13 @@ def build_provider(profile: dict) -> dict:
 
 
 def migrate_provider_keys(config: dict) -> list:
-    """Лечит профили, созданные версией, которая выбирала пакет
-    `@ai-sdk/openai` (ключ из `settings.apiKey` там не читается).
+    """Чинит профили, созданные версией, которая писала ссылку `{env:...}`.
 
-    Возвращает список ID исправленных провайдеров.
+    Раньше ключ подменялся на `settings.apiKey = "{env:NAME}"`, а значение
+    хранилось только в `os.environ` процесса менеджера. OpenCode — отдельный
+    процесс, а на другой машине переменной нет вовсе, поэтому такая ссылка
+    равносильна отсутствию ключа. Возвращает список ID исправленных
+    провайдеров.
     """
     fixed = []
     providers = config.get("providers") if isinstance(config, dict) else None
@@ -1012,33 +1147,54 @@ def migrate_provider_keys(config: dict) -> list:
     for pid, proxy in providers.items():
         if not isinstance(proxy, dict):
             continue
-        if is_chat_completions_package(proxy.get("package")):
-            continue
         settings = proxy.get("settings")
         settings = settings if isinstance(settings, dict) else {}
-        key = settings.get("apiKey") or ""
-        if not key.startswith("sk-cvc-"):
+        key = settings.get("apiKey")
+        name = placeholder_env_name(key)
+        resolved = resolve_api_key(key)
+        changed = False
+        if name:
+            # ссылка без значения бесполезна: оставляем реальный ключ,
+            # иначе честно убираем поле (UI покажет «не задан»)
+            if resolved:
+                settings["apiKey"] = resolved
+            else:
+                settings.pop("apiKey", None)
+            changed = True
+        if (resolved.startswith("sk-cvc-")
+                and not is_chat_completions_package(proxy.get("package"))):
+            # такие прокси поддерживают только /chat/completions
+            proxy["package"] = "@opencode/ai/providers/openai-compatible"
+            changed = True
+        before_env = copy.deepcopy(proxy.get("env"))
+        _strip_generated_env(proxy, pid)
+        if proxy.get("env") != before_env:
+            changed = True
+        if not changed:
             continue
-        proxy["package"] = "@opencode/ai/providers/openai-compatible"
-        env_name = _env_key(pid)
-        proxy["env"] = [env_name]
-        settings["apiKey"] = "{env:%s}" % env_name
-        os.environ[env_name] = key
-        proxy["settings"] = settings
+        if settings:
+            proxy["settings"] = settings
+        else:
+            proxy.pop("settings", None)
         fixed.append(pid)
     return fixed
 
 
-def apply_profiles(config: dict, profiles: list) -> dict:
+def apply_profiles(config: dict, profiles: list, keep_ids=None) -> dict:
     new = copy.deepcopy(config)
-    if not isinstance(new.get("providers"), dict):
-        new["providers"] = {}
-    new["providers"] = {p["id"]: build_provider(p) for p in profiles}
+    old = new.get("providers") if isinstance(new.get("providers"), dict) else {}
+    result = {p["id"]: build_provider(p) for p in profiles}
+    # провайдеры, которых менеджер не загружал (появились в файле позже),
+    # не теряем; удаление загруженных профилей при этом работает как раньше
+    for pid in (keep_ids or ()):
+        if pid not in result and isinstance(old.get(pid), dict):
+            result[pid] = copy.deepcopy(old[pid])
+    new["providers"] = result
     ref = default_model_ref(new)
     pid = parse_model_ref(ref)[0]
     if ref and pid not in new["providers"]:
         new.pop("model", None)
-    return new
+    return strip_coefficients(new)
 
 
 # ==========================================================================
@@ -1052,18 +1208,21 @@ EXPORT_TYPE_SINGLE = "opencode-provider-profile"
 
 def profile_to_export(profile: dict) -> dict:
     """Профиль в виде, пригодном для записи в файл (без служебных полей)."""
+    key = usable_api_key(profile)
     return {
         "id": profile["id"],
         "display_name": profile["display_name"],
         "coefficient": str(profile.get("coefficient") or ""),
         "base_url": profile["base_url"],
         "package": profile["package"],
-        "api_key": profile["api_key"],
+        "api_key": key,
+        "key_placeholder": (profile.get("key_placeholder")
+                            or placeholder_env_name(profile.get("api_key"))),
         "models": list(profile["models"]),
         "known_models": list(profile["known_models"]),
         "model_capabilities": copy.deepcopy(profile.get("model_capabilities") or {}),
         "extra_settings": profile.get("extra_settings") or {},
-        "raw": profile.get("_raw") or {},
+        "raw": _clean_provider_raw(profile.get("_raw"), profile["id"], key),
     }
 
 
@@ -1091,18 +1250,24 @@ def profile_from_export(raw: dict) -> dict:
     known = [str(m) for m in (raw.get("known_models") or models) if str(m).strip()]
     caps = raw.get("model_capabilities")
     caps = copy.deepcopy(caps) if isinstance(caps, dict) else {}
+    raw_block = raw.get("raw") if isinstance(raw.get("raw"), dict) else {}
+    raw_settings = raw_block.get("settings") if isinstance(raw_block.get("settings"), dict) else {}
+    api_key = (resolve_api_key(raw.get("api_key"))
+               or resolve_api_key(raw_settings.get("apiKey")))
     return {
         "id": pid,
         "display_name": raw.get("display_name") or pid,
         "coefficient": str(raw.get("coefficient") or ""),
         "base_url": raw.get("base_url") or "",
-        "api_key": raw.get("api_key") or "",
+        "api_key": api_key,
+        "key_placeholder": (raw.get("key_placeholder")
+                            or placeholder_env_name(raw.get("api_key"))),
         "package": raw.get("package") or PACKAGES[0],
         "models": models,
         "known_models": known,
         "model_capabilities": caps,
         "extra_settings": raw.get("extra_settings") or {},
-        "_raw": raw.get("raw") or None,
+        "_raw": _clean_provider_raw(raw_block, pid, api_key) or None,
     }
 
 
@@ -1180,40 +1345,47 @@ def merge_profiles_into_config(config: dict, profiles: list) -> dict:
         base = copy.deepcopy(existing)
         if isinstance(raw, dict):
             for key, value in raw.items():
-                if key == "models":
+                # settings/env пересобираем ниже: в них могла остаться ссылка
+                # {env:...}, значение которой нигде не сохранено
+                if key in ("models", "settings", "env"):
                     continue
                 base[key] = copy.deepcopy(value)
             raw_models = raw.get("models")
             if isinstance(raw_models, dict):
-                merged = raw_models if isinstance(base.get("models"), dict) else {}
-                for mid, spec in base.get("models", {}).items():
-                    merged.setdefault(mid, spec)
+                # копия, иначе raw-модели терялись при первом переносе
+                merged = copy.deepcopy(raw_models)
+                if isinstance(base.get("models"), dict):
+                    for mid, spec in base["models"].items():
+                        merged.setdefault(mid, spec)
                 base["models"] = merged
         settings = {}
+        raw_settings = raw.get("settings") if isinstance(raw, dict) else None
+        if isinstance(raw_settings, dict):
+            for key, value in raw_settings.items():
+                if key == "apiKey":
+                    continue
+                settings[key] = copy.deepcopy(value)
+        _strip_generated_env(base, pid)
         base_url = normalize_base_url(profile.get("base_url", ""))
         if base_url:
             settings["baseURL"] = base_url
-        if profile.get("api_key"):
-            settings["apiKey"] = profile["api_key"]
+        key = usable_api_key(profile)
+        if key:
+            settings["apiKey"] = key
+        else:
+            settings.pop("apiKey", None)
         for key, value in (profile.get("extra_settings") or {}).items():
+            if key == "apiKey":
+                continue
             settings[key] = value
         base["name"] = profile.get("display_name") or pid
         base["package"] = profile.get("package") or PACKAGES[0]
-        env_name = ""
-        if not is_chat_completions_package(base["package"]):
-            # пакет не читает settings.apiKey — ключ уходит через окружение
-            env_name = _env_key(pid)
-            base["env"] = [env_name]
-            settings["apiKey"] = "{env:%s}" % env_name
-            if profile.get("api_key"):
-                os.environ[env_name] = profile["api_key"]
-        elif env_name and base.get("env") == [env_name]:
-            base.pop("env", None)
         if settings:
             base["settings"] = settings
-        coef = str(profile.get("coefficient") or "").strip()
-        if coef:
-            base["_coefficient"] = coef
+        else:
+            base.pop("settings", None)
+        # коэффициент хранится в отдельном файле, в конфиг не пишется
+        base.pop("_coefficient", None)
         # модели: отмеченные добавляем/включаем, остальные НЕ трогаем.
         # Скрывать чужие модели здесь нельзя: перенос не должен менять то,
         # что пользователь не выбирал (иначе пропадали модели из OpenCode).
@@ -1228,7 +1400,7 @@ def merge_profiles_into_config(config: dict, profiles: list) -> dict:
         if old_models:
             base["models"] = old_models
         providers[pid] = base
-    return new
+    return strip_coefficients(new)
 
 
 def agents_settings_path() -> Path:
@@ -1612,7 +1784,19 @@ def _transfer_opencode(profiles, default_model, config_path=None, home=None):
     ref = (default_model or "").strip()
     if ref and ref != "(не задана)":
         new_config["model"] = ref
+    # коэффициенты — в отдельный файл рядом с конфигом
+    coefs = coefficients_map(config)
+    for profile in profiles:
+        pid = str(profile.get("id") or "")
+        if not pid:
+            continue
+        text = str(profile.get("coefficient") or "").strip()
+        if text:
+            coefs[pid] = text
+        else:
+            coefs.pop(pid, None)
     backup = save_config(path, new_config)
+    save_coefficients(path, coefs)
     return {
         "agent": "opencode", "title": "OpenCode (этот конфиг)", "ok": True,
         "path": path, "backup": backup,
@@ -1784,17 +1968,137 @@ def _ensure_vscode_extension(home=None) -> str:
     return "Расширение установлено: %s" % target.name
 
 
+def _jsonc_skip_ws(text: str, i: int, n: int | None = None) -> int:
+    """Пропускает пробелы и комментарии (// и /* */) с позиции i."""
+    n = len(text) if n is None else n
+    while i < n:
+        ch = text[i]
+        if ch in " \t\r\n":
+            i += 1
+        elif ch == "/" and i + 1 < n and text[i + 1] == "/":
+            i += 2
+            while i < n and text[i] != "\n":
+                i += 1
+        elif ch == "/" and i + 1 < n and text[i + 1] == "*":
+            i += 2
+            while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
+                i += 1
+            i += 2
+        else:
+            break
+    return i
+
+
+def _jsonc_string_end(text: str, i: int, n: int) -> int:
+    """i — на открывающей кавычке; возвращает индекс сразу после закрывающей."""
+    i += 1
+    while i < n:
+        ch = text[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == '"':
+            return i + 1
+        i += 1
+    return n
+
+
+def _jsonc_value_end(text: str, i: int, n: int) -> int:
+    """i — на первом символе значения; возвращает индекс сразу после него."""
+    if i >= n:
+        return i
+    if text[i] == '"':
+        return _jsonc_string_end(text, i, n)
+    if text[i] in "[{":
+        depth = 0
+        while i < n:
+            ch = text[i]
+            if ch == '"':
+                i = _jsonc_string_end(text, i, n)
+                continue
+            if ch in "[{":
+                depth += 1
+            elif ch in "]}":
+                depth -= 1
+                if depth == 0:
+                    return i + 1
+            i += 1
+        return n
+    while i < n and text[i] not in ",]} \t\r\n/":
+        i += 1
+    return i
+
+
+def _jsonc_root_spans(text: str) -> list:
+    """[(ключ, начало, конец)] для полей верхнего уровня JSONC-объекта."""
+    n = len(text)
+    i = _jsonc_skip_ws(text, 0, n)
+    if i >= n or text[i] != "{":
+        return []
+    i += 1
+    spans = []
+    while True:
+        i = _jsonc_skip_ws(text, i, n)
+        if i >= n or text[i] != '"':
+            break
+        start = i
+        key_end = _jsonc_string_end(text, i, n)
+        try:
+            name = json.loads(text[start:key_end])
+        except Exception:
+            name = text[start + 1:max(start + 1, key_end - 1)]
+        i = _jsonc_skip_ws(text, key_end, n)
+        if i >= n or text[i] != ":":
+            break
+        i = _jsonc_skip_ws(text, i + 1, n)
+        value_end = _jsonc_value_end(text, i, n)
+        spans.append((name, start, value_end))
+        i = _jsonc_skip_ws(text, value_end, n)
+        if i < n and text[i] == ",":
+            i += 1
+            continue
+        break
+    return spans
+
+
+def _jsonc_remove_root_key(text: str, key: str) -> str:
+    """Удаляет все поля `key` верхнего уровня, сохраняя комментарии и порядок."""
+    spans = [(start, end) for name, start, end in _jsonc_root_spans(text)
+             if name == key]
+    if not spans:
+        return text
+    n = len(text)
+    for start, end in reversed(spans):
+        after = _jsonc_skip_ws(text, end, n)
+        if after < n and text[after] == ",":
+            end = after + 1
+        text = text[:start] + text[end:]
+    # запятая перед закрывающей скобкой делает JSON невалидным
+    n = len(text)
+    spans = _jsonc_root_spans(text)
+    if spans:
+        last_end = spans[-1][2]
+        j = _jsonc_skip_ws(text, last_end, n)
+        if j < n and text[j] == ",":
+            k = _jsonc_skip_ws(text, j + 1, n)
+            if k < n and text[k] == "}":
+                text = text[:j] + text[j + 1:]
+    return text
+
+
 def _patch_vscode_settings(settings_path: Path, config_path) -> str:
     """Прописывает opencodeLM.configPath в settings.json, не ломая остальное.
 
-    Если файл содержит комментарии (JSONC), он не перезаписывается целиком:
-    строка вставляется сразу после открывающей скобки, чтобы комментарии
-    и форматирование пользователя остались на месте.
+    Файл может быть JSONC с комментариями, поэтому текст правится точечно:
+    все старые вхождения ключа удаляются, новое ставится одно — после
+    открывающей скобки. Повторный запуск ничего не меняет.
     """
+    want = str(config_path) if config_path else ""
     text = _read_text(settings_path)
     if not text.strip():
-        data = {"opencodeLM.configPath": str(config_path)}
-        _atomic_write(settings_path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+        data = {"opencodeLM.configPath": want} if want else {}
+        _atomic_write(settings_path,
+                      json.dumps(data, indent=2, ensure_ascii=False) + "\n")
         return "settings.json создан"
     try:
         data = json.loads(text)
@@ -1805,25 +2109,40 @@ def _patch_vscode_settings(settings_path: Path, config_path) -> str:
             return "settings.json не разбирается — пропущен (задайте путь вручную)"
         if not isinstance(data, dict):
             return "settings.json не является объектом — пропущен"
-        if data.get("opencodeLM.configPath") == str(config_path):
-            return "opencodeLM.configPath уже указывает на конфиг"
-        insert_at = text.find("{")
-        if insert_at < 0:
-            return "settings.json без открывающей скобки — пропущен"
-        line = '\n    "opencodeLM.configPath": %s,' % json.dumps(
-            str(config_path), ensure_ascii=False)
-        patched = text[:insert_at + 1] + line + text[insert_at + 1:]
-        _backup_file(settings_path)
-        _atomic_write(settings_path, patched)
-        return "opencodeLM.configPath = %s (комментарии сохранены)" % config_path
     if not isinstance(data, dict):
         return "settings.json не является объектом — пропущен"
-    if config_path and data.get("opencodeLM.configPath") != str(config_path):
-        data["opencodeLM.configPath"] = str(config_path)
+
+    spans = _jsonc_root_spans(text)
+    matches = [(start, end) for name, start, end in spans
+               if name == "opencodeLM.configPath"]
+    if want and len(matches) == 1:
+        start, end = matches[0]
+        try:
+            value = json.loads(text[start:end].split(":", 1)[1].strip())
+        except Exception:
+            value = None
+        if value == want:
+            return "opencodeLM.configPath уже указывает на конфиг"
+
+    cleaned = _jsonc_remove_root_key(text, "opencodeLM.configPath")
+    if not want:
         _backup_file(settings_path)
-        _atomic_write(settings_path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
-        return "opencodeLM.configPath = %s" % config_path
-    return "opencodeLM.configPath уже указывает на конфиг"
+        _atomic_write(settings_path, cleaned)
+        return "opencodeLM.configPath удалён"
+    open_at = _jsonc_skip_ws(cleaned, 0)
+    if open_at >= len(cleaned) or cleaned[open_at] != "{":
+        return "settings.json без открывающей скобки — пропущен"
+    has_items = bool(_jsonc_root_spans(cleaned))
+    if has_items:
+        line = '\n    "opencodeLM.configPath": %s,' % json.dumps(
+            want, ensure_ascii=False)
+    else:
+        line = '\n    "opencodeLM.configPath": %s\n' % json.dumps(
+            want, ensure_ascii=False)
+    patched = cleaned[:open_at + 1] + line + cleaned[open_at + 1:]
+    _backup_file(settings_path)
+    _atomic_write(settings_path, patched)
+    return "opencodeLM.configPath = %s (комментарии сохранены)" % config_path
 
 
 def _transfer_vscode(profiles, default_model, config_path=None, home=None):
@@ -1845,6 +2164,34 @@ def _transfer_vscode(profiles, default_model, config_path=None, home=None):
     }
 
 
+def _cline_provider_id(pid: str) -> str:
+    """ID провайдера для Cline: не совпадает со встроенными и проходит их схему.
+
+    Cline игнорирует настройки, у которых `settings.provider` — встроенный
+    ID (`registerProviderSettingsProvider` выходит сразу), а ID обязан
+    соответствовать `^[a-z0-9][a-z0-9-]*$`.
+    """
+    raw = str(pid or "").strip().lower()
+    safe = re.sub(r"[^a-z0-9-]+", "-", raw).strip("-")
+    safe = re.sub(r"-{2,}", "-", safe)
+    lossy = not safe or safe != raw
+    if not safe:
+        safe = "provider"
+    if not safe[0].isalnum():
+        safe = "p-" + safe
+        lossy = True
+    if lossy:
+        # кириллица и спецсимволы схлопываются в дефисы: без суффикса два
+        # разных профиля получили бы один и тот же ID
+        safe = "%s-%s" % (safe, hashlib.sha1(raw.encode("utf-8")).hexdigest()[:6])
+    return "ocm-" + safe
+
+
+def _cline_now() -> str:
+    """UTC-время в формате zod `.datetime()` (обязателен суффикс Z)."""
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
 def _transfer_cline(profiles, default_model, home=None):
     """Cline: providers.json (формат v4) + models.json со списком моделей."""
     path = cline_providers_path(home)
@@ -1858,31 +2205,48 @@ def _transfer_cline(profiles, default_model, home=None):
             raise RuntimeError("providers.json не разбирается: %s" % exc)
     if not isinstance(data, dict):
         raise RuntimeError("providers.json не является объектом JSON")
-    data.setdefault("version", 1)
+    data["version"] = 1
     providers = data.get("providers")
     if not isinstance(providers, dict):
         providers = {}
-    now = datetime.now().astimezone().isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    now = _cline_now()
     for profile in profiles:
-        pid = str(profile.get("id") or "")
+        pid = _cline_provider_id(profile.get("id"))
         settings = {
-            "provider": "openai-compatible",
-            "apiKey": profile.get("api_key") or "",
+            "provider": pid,
             "model": _primary_model(profile, default_model),
-            "baseUrl": profile.get("base_url"),
+            "baseUrl": normalize_base_url(profile.get("base_url") or ""),
             "headers": {},
             "reasoning": {"enabled": False},
         }
+        key = usable_api_key(profile)
+        if key:
+            settings["apiKey"] = key
         previous = providers.get(pid) if isinstance(providers.get(pid), dict) else {}
         entry = dict(previous)
         entry["settings"] = settings
-        entry["updatedAt"] = now
         entry["tokenSource"] = "manual"
+        # не дёргаем updatedAt, если ничего не поменялось: иначе каждая
+        # синхронизация переписывает файл
+        if previous.get("settings") != settings:
+            entry["updatedAt"] = now
+        else:
+            entry["updatedAt"] = previous.get("updatedAt") or now
         providers[pid] = entry
+        # убираем запись, которую писали раньше под «сырым» id профиля
+        legacy = str(profile.get("id") or "")
+        if legacy and legacy != pid:
+            old = providers.get(legacy)
+            if isinstance(old, dict):
+                old_settings = old.get("settings") if isinstance(old.get("settings"), dict) else {}
+                if (old_settings.get("provider") == "openai-compatible"
+                        and normalize_base_url(old_settings.get("baseUrl") or "")
+                        == settings["baseUrl"]):
+                    providers.pop(legacy, None)
     data["providers"] = providers
     primary = _pick_primary(profiles, default_model)
     if primary is not None:
-        data["lastUsedProvider"] = str(primary.get("id"))
+        data["lastUsedProvider"] = _cline_provider_id(primary.get("id"))
     data.setdefault("modes", {})
     _backup_file(path)
     _atomic_write(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
@@ -1895,12 +2259,12 @@ def _transfer_cline(profiles, default_model, home=None):
         models_doc = {}
     if not isinstance(models_doc, dict):
         models_doc = {}
-    models_doc.setdefault("version", 1)
+    models_doc["version"] = 1
     per_provider = models_doc.get("providers")
     if not isinstance(per_provider, dict):
         per_provider = {}
     for profile in profiles:
-        pid = str(profile.get("id") or "")
+        pid = _cline_provider_id(profile.get("id"))
         entry = per_provider.get(pid) if isinstance(per_provider.get(pid), dict) else {}
         known = entry.get("models") if isinstance(entry.get("models"), dict) else {}
         for mid in profile.get("models") or []:
@@ -1908,7 +2272,22 @@ def _transfer_cline(profiles, default_model, home=None):
             spec["supportsVision"] = profile_model_vision(profile, mid)
             known[mid] = spec
         entry["models"] = known
+        # метаданные провайдера: без них Cline не регистрирует модели
+        entry["provider"] = {
+            "name": str(profile.get("display_name") or profile.get("id")),
+            "baseUrl": normalize_base_url(profile.get("base_url") or ""),
+        }
         per_provider[pid] = entry
+        legacy = str(profile.get("id") or "")
+        if legacy and legacy != pid:
+            old_entry = per_provider.get(legacy)
+            if isinstance(old_entry, dict) and not isinstance(old_entry.get("provider"), dict):
+                old_models = old_entry.get("models")
+                old_ids = set(old_models) if isinstance(old_models, dict) else set()
+                # удаляем только след старой версии менеджера, а не
+                # пользовательский провайдер с тем же именем
+                if old_ids <= set(profile.get("models") or []):
+                    per_provider.pop(legacy, None)
     models_doc["providers"] = per_provider
     _backup_file(models_path)
     _atomic_write(models_path, json.dumps(models_doc, indent=2, ensure_ascii=False) + "\n")
@@ -1928,26 +2307,49 @@ def _transfer_continue(profiles, default_model, home=None):
         doc = {"name": "Local Config", "version": "1.0.0", "schema": "v1"}
     old = doc.get("models")
     models = list(old) if isinstance(old, list) else []
-    ours_bases = {p.get("base_url") for p in profiles if p.get("base_url")}
 
-    def is_ours(entry):
-        return isinstance(entry, dict) and entry.get("apiBase") in ours_bases
-
-    kept = [m for m in models if not is_ours(m)]
-    added = 0
+    # Свои записи узнаём по тройке (провайдер, apiBase, модель), а не только
+    # по apiBase: иначе пользовательская модель на том же URL терялась.
+    ours = {}
     for profile in profiles:
         kind = _provider_kind(profile.get("package"), profile.get("base_url"))
+        base = normalize_base_url(profile.get("base_url") or "")
+        key = usable_api_key(profile)
         for mid in profile.get("models") or []:
             entry = {
                 "name": "%s · %s" % (profile.get("display_name") or profile.get("id"), mid),
                 "provider": kind,
                 "model": mid,
-                "apiBase": profile.get("base_url"),
-                "apiKey": profile.get("api_key") or "",
                 "roles": list(CONTINUE_ROLES),
             }
+            if base:
+                entry["apiBase"] = base
+            if key:
+                entry["apiKey"] = key
             if profile_model_vision(profile, mid):
                 entry["capabilities"] = ["tool_use", "image_input"]
+            ours[(kind, base, mid)] = entry
+
+    def key_of(item):
+        if not isinstance(item, dict):
+            return None
+        return (item.get("provider"),
+                normalize_base_url(item.get("apiBase") or ""),
+                item.get("model"))
+
+    kept = []
+    seen = set()
+    for item in models:
+        bucket = key_of(item)
+        if bucket in ours:
+            if bucket not in seen:
+                kept.append(ours[bucket])
+                seen.add(bucket)
+            continue
+        kept.append(item)
+    added = 0
+    for bucket, entry in ours.items():
+        if bucket not in seen:
             kept.append(entry)
             added += 1
     doc["models"] = kept
@@ -1970,6 +2372,86 @@ def _toml_top_level_lines(text: str) -> tuple:
     return lines[:split], lines[split:]
 
 
+def _toml_split_dotted(name: str) -> list:
+    """Разбирает TOML-ключ `a."b c".d` на части (кавычки снимаются)."""
+    parts, i, n = [], 0, len(name)
+    while i < n:
+        while i < n and name[i] in " \t":
+            i += 1
+        if i >= n:
+            break
+        if name[i] == '"':
+            i += 1
+            buf = []
+            while i < n and name[i] != '"':
+                if name[i] == "\\" and i + 1 < n:
+                    buf.append(name[i + 1])
+                    i += 2
+                    continue
+                buf.append(name[i])
+                i += 1
+            i += 1
+            parts.append("".join(buf))
+        else:
+            start = i
+            while i < n and name[i] not in ".# \t":
+                i += 1
+            parts.append(name[start:i])
+        while i < n and name[i] in " \t":
+            i += 1
+        if i < n and name[i] == ".":
+            i += 1
+    return [p for p in parts if p != ""]
+
+
+def _toml_key_part(pid: str) -> str:
+    """TOML-ключ: голый, если безопасен, иначе в кавычках."""
+    text = str(pid or "")
+    if re.match(r"^[A-Za-z0-9_-]+$", text):
+        return text
+    return _toml_quote(text)
+
+
+def _toml_sections(text: str) -> tuple:
+    """Делит TOML на префикс (верхние ключи) и секции [(header, body_lines)]."""
+    prefix = []
+    sections = []
+    current = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and not line[:1].isspace():
+            current = [line, []]
+            sections.append(current)
+        elif current is None:
+            prefix.append(line)
+        else:
+            current[1].append(line)
+    return prefix, sections
+
+
+def _toml_is_provider_section(header: str, ids) -> bool:
+    stripped = header.strip()
+    if stripped.startswith("[[") or not stripped.startswith("["):
+        return False
+    inner = stripped.strip("[]").strip()
+    parts = _toml_split_dotted(inner)
+    return len(parts) >= 2 and parts[0] == "model_providers" and parts[1] in ids
+
+
+def _toml_join(prefix, sections) -> str:
+    """Собирает TOML обратно: секции через пустую строку, без хвостов."""
+    parts = []
+    head = "\n".join(prefix).strip("\n")
+    if head.strip():
+        parts.append(head)
+    for header, body in sections:
+        block = [header] + list(body)
+        while block and not block[-1].strip():
+            block.pop()
+        parts.append("\n".join(block))
+    return ("\n\n".join(parts).strip("\n") + "\n") if parts else ""
+
+
 def _toml_set_top_level(text: str, values: dict) -> str:
     head, body = _toml_top_level_lines(text)
     keep = []
@@ -1981,6 +2463,8 @@ def _toml_set_top_level(text: str, values: dict) -> str:
         keep.append(line)
     while keep and not keep[0].strip():
         keep.pop(0)
+    while keep and not keep[-1].strip():
+        keep.pop()
     prefix = ["%s = %s" % (key, _toml_quote(value)) for key, value in values.items()]
     result = prefix + keep
     if body:
@@ -1988,43 +2472,29 @@ def _toml_set_top_level(text: str, values: dict) -> str:
     return "\n".join(result).strip("\n") + "\n"
 
 
-def _toml_drop_tables(text: str, headers) -> str:
-    lines = text.splitlines()
-    out = []
-    skipping = False
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("[") and not stripped.startswith("[["):
-            skipping = stripped in headers
-            if skipping:
-                continue
-        elif stripped.startswith("[["):
-            skipping = False
-        if skipping:
-            continue
-        out.append(line)
-    while out and not out[-1].strip():
-        out.pop()
-    return "\n".join(out)
-
-
 def _transfer_codex(profiles, default_model, home=None):
     path = codex_config_path(home)
     text = _read_text(path)
-    headers = {"[model_providers.%s]" % p.get("id") for p in profiles}
-    body = _toml_drop_tables(text, headers)
-    blocks = []
+    ids = {str(p.get("id") or "") for p in profiles if p.get("id")}
+    prefix, sections = _toml_sections(text)
+    kept = [(header, body) for header, body in sections
+            if not _toml_is_provider_section(header, ids)]
     for profile in profiles:
         pid = str(profile.get("id") or "")
-        blocks.append("[model_providers.%s]" % pid)
-        blocks.append("name = %s" % _toml_quote(profile.get("display_name") or pid))
-        blocks.append("base_url = %s" % _toml_quote(profile.get("base_url")))
-        blocks.append("wire_api = \"chat\"")
-        blocks.append("env_key = %s" % _toml_quote(_env_key(pid)))
-        if profile.get("api_key"):
-            blocks.append("experimental_bearer_token = %s" % _toml_quote(profile["api_key"]))
-        blocks.append("")
-    merged = (body.rstrip() + "\n\n" + "\n".join(blocks)).strip("\n") + "\n"
+        block = ["[model_providers.%s]" % _toml_key_part(pid)]
+        block.append("name = %s" % _toml_quote(profile.get("display_name") or pid))
+        base = normalize_base_url(profile.get("base_url") or "")
+        if base:
+            block.append("base_url = %s" % _toml_quote(base))
+        block.append('wire_api = "chat"')
+        key = usable_api_key(profile)
+        if key:
+            # env_key Codex читает строго: переменной в окружении отдельного
+            # процесса нет, и запрос падал бы с EnvVarError. Ключ кладём
+            # в bearer-токен уровня провайдера.
+            block.append("experimental_bearer_token = %s" % _toml_quote(key))
+        kept.append(("\n".join(block), []))
+    merged = _toml_join(prefix, kept)
     primary = _pick_primary(profiles, default_model)
     if primary is not None:
         model = _primary_model(primary, default_model)
@@ -2057,13 +2527,25 @@ def _transfer_claude(profiles, default_model, home=None):
     if primary is None:
         raise RuntimeError("нет профилей с baseURL")
     env = data.get("env") if isinstance(data.get("env"), dict) else {}
-    env["ANTHROPIC_BASE_URL"] = primary.get("base_url")
-    if primary.get("api_key"):
-        env["ANTHROPIC_AUTH_TOKEN"] = primary["api_key"]
-        env["ANTHROPIC_API_KEY"] = primary["api_key"]
+    base = normalize_base_url(primary.get("base_url") or "")
+    if base:
+        env["ANTHROPIC_BASE_URL"] = base
+    else:
+        env.pop("ANTHROPIC_BASE_URL", None)
+    key = usable_api_key(primary)
+    if key:
+        env["ANTHROPIC_AUTH_TOKEN"] = key
+        env["ANTHROPIC_API_KEY"] = key
+    else:
+        # профиль без ключа: старые токены, записанные менеджером ранее,
+        # иначе достанутся агенту и запросы будут отклонены
+        env.pop("ANTHROPIC_AUTH_TOKEN", None)
+        env.pop("ANTHROPIC_API_KEY", None)
     model = _primary_model(primary, default_model)
     if model:
         env["ANTHROPIC_MODEL"] = model
+    else:
+        env.pop("ANTHROPIC_MODEL", None)
     data["env"] = env
     _backup_file(path)
     _atomic_write(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
@@ -2081,9 +2563,15 @@ def _transfer_aider(profiles, default_model, home=None):
     if primary is None:
         raise RuntimeError("нет профилей с baseURL")
     model = _primary_model(primary, default_model)
-    doc["openai-api-base"] = primary.get("base_url")
-    if primary.get("api_key"):
-        doc["openai-api-key"] = primary["api_key"]
+    base = normalize_base_url(primary.get("base_url") or "")
+    if base:
+        doc["openai-api-base"] = base
+    key = usable_api_key(primary)
+    if key:
+        doc["openai-api-key"] = key
+    else:
+        # не оставляем чужой/старый ключ от предыдущего профиля
+        doc.pop("openai-api-key", None)
     if model:
         doc["model"] = "openai/%s" % model
     _backup_file(path)
@@ -2145,11 +2633,13 @@ def _dsh_provider_entry(profile, default_model):
         models.append(spec)
     entry = {
         "displayName": profile.get("display_name") or profile.get("id"),
-        "apiKeyEnv": _dsh_env_key(profile.get("id")),
         "api": "openai-completions",
-        "baseURL": profile.get("base_url"),
+        "baseURL": normalize_base_url(profile.get("base_url") or ""),
         "models": models,
     }
+    if usable_api_key(profile):
+        # без ключа ссылка на несуществующую переменную ломает провайдер
+        entry["apiKeyEnv"] = _dsh_env_key(profile.get("id"))
     return entry
 
 
@@ -2186,13 +2676,22 @@ def _transfer_dsh(profiles, default_model, home=None):
     refs = creds.get("refs")
     if not isinstance(refs, dict):
         refs = {}
+    changed = False
     written = 0
     for profile in profiles:
-        key = profile.get("api_key")
+        env_name = _dsh_env_key(profile.get("id"))
+        key = usable_api_key(profile)
         if key:
-            refs[_dsh_env_key(profile.get("id"))] = key
+            if refs.get(env_name) != key:
+                changed = True
+            refs[env_name] = key
             written += 1
-    if written:
+        elif env_name in refs:
+            # профиль без ключа: убираем старую ссылку, иначе DSH возьмёт
+            # значение из прошлой синхронизации
+            refs.pop(env_name, None)
+            changed = True
+    if changed:
         creds["refs"] = refs
         _backup_file(cred_path)
         _atomic_write(cred_path, _dump_yaml_any(creds))
@@ -2423,6 +2922,9 @@ class ProfileDialog(tk.Toplevel):
         self.capability_vars = {}
         self.capability_hidden = set()
         self.known_models = list((profile or {}).get("known_models", []))
+        # именно выбранные модели профиля, а не все известные: иначе при
+        # повторном открытии диалог отмечал все модели, включая disabled
+        self._chosen = set((profile or {}).get("models") or [])
         self._raw = (profile or {}).get("_raw")
 
         self.title("НОВЫЙ ПРОФИЛЬ" if self.is_new else "ПРОФИЛЬ " + str(profile["id"]).upper())
@@ -2438,7 +2940,7 @@ class ProfileDialog(tk.Toplevel):
         self.var_id = tk.StringVar(master=self, value=(profile or {}).get("id", ""))
         self.var_name = tk.StringVar(master=self, value=(profile or {}).get("display_name", ""))
         self.var_url = tk.StringVar(master=self, value=(profile or {}).get("base_url", ""))
-        self.var_key = tk.StringVar(master=self, value=(profile or {}).get("api_key", ""))
+        self.var_key = tk.StringVar(master=self, value=usable_api_key(profile or {}))
         self.var_pkg = tk.StringVar(master=self, value=(profile or {}).get("package", PACKAGES[0]))
         self.var_set_default = tk.BooleanVar(master=self, value=False)
         self.var_coef = tk.StringVar(master=self,
@@ -2685,6 +3187,10 @@ class ProfileDialog(tk.Toplevel):
                 key: tk.BooleanVar(master=self, value=bool(flags.get(key)))
                 for key, _ in CAPABILITY_KEYS
             }
+            # подпись «ВОЗМОЖНОСТИ: …» обновляем одним trace на переменную,
+            # а не новым trace при каждом рендере (иначе они копятся)
+            for var in self.capability_vars[mid].values():
+                var.trace_add("write", lambda *a, m=mid: self._refresh_cap_summary(m))
         return self.capability_vars[mid]
 
     def _has_capability_flags(self, mid):
@@ -2731,7 +3237,11 @@ class ProfileDialog(tk.Toplevel):
         for m in self.models:
             mid = m["id"]
             if mid not in self.model_vars:
-                var = tk.BooleanVar(value=mid in (self.known_models or []))
+                if self.is_new:
+                    value = mid in (self.known_models or [])
+                else:
+                    value = mid in self._chosen
+                var = tk.BooleanVar(master=self, value=value)
                 var.trace_add("write", lambda *a: self._update_counter())
                 self.model_vars[mid] = var
             if not self._visible(mid):
@@ -2762,7 +3272,6 @@ class ProfileDialog(tk.Toplevel):
             vars_ = self._cap_vars(mid)
             for col, (key, label) in enumerate(CAPABILITY_KEYS):
                 var = vars_[key]
-                var.trace_add("write", lambda *a, m=mid: self._refresh_cap_summary(m))
                 tk.Checkbutton(
                     caps_row, text=label, variable=var,
                     bg=T.bg_input, fg=T.ink, selectcolor=T.bg_panel_hi,
@@ -2773,6 +3282,7 @@ class ProfileDialog(tk.Toplevel):
             tk.Label(self.inner, text="ПО ФИЛЬТРУ НИЧЕГО НЕ НАЙДЕНО",
                      bg=T.bg_panel, fg=T.ink_dim,
                      font=T.mono_small).pack(anchor="w", padx=10, pady=10)
+        self._update_counter()
 
     # --- сеть -------------------------------------------------------------
     def _check_key(self):
@@ -2810,8 +3320,12 @@ class ProfileDialog(tk.Toplevel):
             self.lbl_status.configure(text="ОШИБКА: %s" % err)
             messagebox.showerror("Проверка ключа", str(err), parent=self)
             return
-        keep = {mid for mid, var in self.model_vars.items() if var.get()} or set(self.known_models or [])
-        default_all = not keep
+        current = {mid for mid, var in self.model_vars.items() if var.get()}
+        keep = current
+        # отмечать всё можно только при самом первом получении списка: если
+        # пользователь осознанно снял все галочки, повторная проверка не должна
+        # включать их обратно
+        default_all = not self.model_vars and not self.known_models
         self.models = found
         self.model_vars = {}
         for m in found:
@@ -2909,11 +3423,26 @@ class ProfileDialog(tk.Toplevel):
                 "Модели", "Ни одна модель не отмечена — профиль будет без моделей. Продолжить?",
                 parent=self):
             return
+        api_key = self.var_key.get().strip()
+        placeholder = placeholder_env_name(api_key)
+        if placeholder:
+            resolved = resolve_api_key(api_key)
+            if resolved:
+                api_key = resolved
+            else:
+                messagebox.showwarning(
+                    "API KEY",
+                    "В поле ключа ссылка {env:%s}, но переменная не задана.\n"
+                    "OpenCode и другие агенты запускаются отдельными процессами "
+                    "и такую ссылку не разрешат — ключ будет считаться пустым.\n"
+                    "Вставьте настоящий ключ." % placeholder,
+                    parent=self)
+                api_key = ""
         self.result = {
             "id": pid,
             "display_name": (self.var_name.get() or pid).strip(),
             "base_url": base,
-            "api_key": self.var_key.get().strip(),
+            "api_key": api_key,
             "package": self.var_pkg.get(),
             "models": chosen,
             "known_models": [m["id"] for m in self.models] or list(self.known_models),
@@ -3067,6 +3596,14 @@ class SmartCheck(tk.Checkbutton):
     Обычный клик работает как обычно.
     """
 
+    #: Маска Shift в event.state Tk.
+    SHIFT_STATE = 0x0001
+    #: Маска Ctrl в event.state Tk.
+    CTRL_STATE = 0x0004
+    # ВАЖНО: 0x0008 на Windows — это Mod1Mask/NumLock, а не второй Ctrl.
+    # Если считать его Ctrl, то при включённом NumLock любой обычный клик
+    # уходит в toggle_all() и отмечает все модели.
+
     def __init__(self, master, owner, variable, text, **kw):
         kw.setdefault("bg", T.bg_panel)
         kw.setdefault("fg", T.ink)
@@ -3088,20 +3625,14 @@ class SmartCheck(tk.Checkbutton):
         self._old = self._watcher.get()
 
     def _on_click(self, event):
-        mods = event.state
-        shift = bool(mods & 0x0001)
-        ctrl = bool(mods & 0x0004)
-        ctrl2 = bool(mods & 0x0008)
-        alt = bool(mods & 0x20000)
-        if shift or ctrl or ctrl2:
+        mods = int(getattr(event, "state", 0) or 0)
+        shift = bool(mods & self.SHIFT_STATE)
+        ctrl = bool(mods & self.CTRL_STATE)
+        if shift or ctrl:
             if shift:
                 self._owner.toggle_all(flip=True)
             else:
                 self._owner.toggle_all(flip=False, want=not self._old)
-            try:
-                self.selection_clear()
-            except Exception:
-                pass
             return "break"
         return None
 
@@ -3278,9 +3809,10 @@ def mcp_catalog_entry(server_id):
 def mcp_server_entry(item, values=None) -> dict:
     """Собирает запись для `mcp.<id>` из каталога и значений полей.
 
-    Значения-секреты пишутся не открытым текстом, а подстановкой
-    `{env:ИМЯ}`: OpenCode возьмёт переменную из окружения, а конфиг можно
-    безопасно копировать и архивировать.
+    Секреты пишутся реальным значением: ссылка `{env:ИМЯ}` работает только
+    если переменная задана в окружении потребителя, а менеджер может
+    выставить её лишь в своём процессе. На другой машине это даёт пустой
+    токен, поэтому храним значение в файле — так же, как ключи провайдеров.
     """
     values = values if isinstance(values, dict) else {}
     if item.get("kind") == "remote":
@@ -3292,7 +3824,7 @@ def mcp_server_entry(item, values=None) -> dict:
                     raise ValueError("не заполнено поле «%s»" % field["label"])
                 continue
             if field.get("secret"):
-                headers["Authorization"] = "Bearer {env:%s}" % field["key"]
+                headers["Authorization"] = "Bearer %s" % value
             else:
                 headers["X-%s" % field["key"]] = value
         entry = {"type": "remote", "url": item["url"], "enabled": True}
@@ -3315,8 +3847,9 @@ def mcp_server_entry(item, values=None) -> dict:
                 raise ValueError("не заполнено поле «%s»" % field["label"])
             continue
         if field.get("env"):
-            # секрет: в файл попадает только ссылка на переменную окружения
-            environment[field["key"]] = "{env:%s}" % field["key"]
+            # секрет: значение пишем в файл — ссылка {env:...} на другой
+            # машине окажется пустой
+            environment[field["key"]] = value
         elif not field.get("path_arg"):
             environment[field["key"]] = value
     if environment:
@@ -3476,8 +4009,6 @@ def apply_mcp_servers(config, servers, mcp_config_path=None) -> dict:
     for name, entry in (servers or {}).items():
         report[name] = _mcp_merge_check(before, name, entry)
         box[name] = copy.deepcopy(entry)
-        for env_name in mcp_entry_secrets(entry):
-            os.environ.setdefault(env_name, "")
     mcp["servers"] = box
     if mcp_config_path:
         path = Path(mcp_config_path)
@@ -6239,6 +6770,7 @@ class App:
         self.config_path = default_config_path()
         self.config = {}
         self.profiles = []
+        self._loaded_provider_ids = set()
         self.selected = None
         self._base_signature = ""
         self._history = []
@@ -6496,11 +7028,13 @@ class App:
         self.config_path = path
         try:
             self.config = load_config(path)
-            self.profiles = profiles_from_config(self.config)
+            self.profiles = profiles_from_config(self.config,
+                                                 load_coefficients(path))
         except Exception as exc:
             messagebox.showerror("Чтение конфига",
                                  "Не удалось прочитать:\n%s\n\n%s" % (path, exc))
             self.config, self.profiles = {}, []
+        self._loaded_provider_ids = {p["id"] for p in self.profiles}
         self.var_default_model.set(default_model_ref(self.config) or "(не задана)")
         self._render_list()
         self._refresh_history()
@@ -6585,8 +7119,13 @@ class App:
         for key in ("id", "display_name", "base_url", "package"):
             self.detail_vars[key].set(profile[key])
         key = profile["api_key"]
-        self.detail_vars["api_key"].set(
-            "(не задан)" if not key else (key[:6] + "…" + key[-4:] if len(key) > 12 else "••••"))
+        if not key:
+            placeholder = profile.get("key_placeholder") or placeholder_env_name(
+                ((profile.get("_raw") or {}).get("settings") or {}).get("apiKey"))
+            text = ("(не задан: ссылка {env:%s})" % placeholder) if placeholder else "(не задан)"
+        else:
+            text = key[:6] + "…" + key[-4:] if len(key) > 12 else "••••"
+        self.detail_vars["api_key"].set(text)
         self.lst_models.delete(0, "end")
         for mid in profile["models"]:
             self.lst_models.insert("end", mid)
@@ -7097,18 +7636,44 @@ class App:
     # --- сохранение -------------------------------------------------------
     def write_config(self):
         was_dirty = self._is_dirty()
+        missing = [p["id"] for p in self.profiles
+                   if p.get("key_placeholder") and not p.get("api_key")]
+        if missing and not messagebox.askyesno(
+                "API KEY",
+                "У профилей %s ключ записан ссылкой {env:...}, но переменная "
+                "не задана. OpenCode запускается отдельным процессом и ключ "
+                "не увидит — запросы будут отклонены.\n\n"
+                "Сохранить конфиг без этих ключей?" % ", ".join(missing),
+                parent=self.root):
+            return
         try:
-            new_config = apply_profiles(self.config, self.profiles)
+            keep_ids = set(self.config.get("providers") or {}) - set(self._loaded_provider_ids)
+            # коэффициенты выносим в отдельный файл до записи конфига: схема
+            # OpenCode не разрешает `_coefficient` внутри providers.<id>
+            coefs = load_coefficients(self.config_path)
+            coefs.update(coefficients_map(self.config))
+            for profile in self.profiles:
+                pid = str(profile.get("id") or "")
+                if not pid:
+                    continue
+                text = str(profile.get("coefficient") or "").strip()
+                if text:
+                    coefs[pid] = text
+                else:
+                    coefs.pop(pid, None)
+            new_config = apply_profiles(self.config, self.profiles, keep_ids=keep_ids)
             ref = self.var_default_model.get().strip()
             if ref and ref != "(не задана)":
                 new_config["model"] = ref
             fixed = migrate_provider_keys(new_config)
             backup = save_config(self.config_path, new_config)
+            save_coefficients(self.config_path, coefs)
         except Exception as exc:
             messagebox.showerror("Запись конфига", str(exc), parent=self.root)
             return
         self.config = new_config
-        self.profiles = profiles_from_config(self.config)
+        self.profiles = profiles_from_config(self.config, coefs)
+        self._loaded_provider_ids = {p["id"] for p in self.profiles}
         self._base_signature = self._signature()
         self._render_list()
         self._refresh_history()
@@ -7117,9 +7682,9 @@ class App:
         self._set_status(msg.upper())
         extra = ""
         if fixed:
-            extra = ("\n\nИсправлен package у провайдеров с ключом sk-cvc-*: %s\n"
-                     "(@ai-sdk/openai не передаёт ключ — OpenCode отвечал "
-                     "«API key is required»)" % ", ".join(fixed))
+            extra = ("\n\nИсправлены провайдеры со ссылкой {env:...} или пакетом "
+                     "@ai-sdk/openai: %s\n"
+                     "Ключ снова хранится в самом конфиге." % ", ".join(fixed))
         messagebox.showinfo(
             "Готово",
             "%s\n\nФайл: %s\n\nОткат: кнопка «ИСТОРИЯ И ОТКАТ…» или Ctrl+Z%s" % (

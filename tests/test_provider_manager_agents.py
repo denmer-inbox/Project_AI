@@ -81,18 +81,18 @@ def test_transfer_to_cline_writes_provider_and_models(manager, tmp_path):
 
     assert [r["ok"] for r in results] == [True]
     doc = json.loads(providers.read_text(encoding="utf-8"))
-    assert doc["lastUsedProvider"] == "beta"
+    assert doc["lastUsedProvider"] == "ocm-beta"
     assert "cline" in doc["providers"]
-    alpha = doc["providers"]["alpha"]["settings"]
-    assert alpha["provider"] == "openai-compatible"
+    alpha = doc["providers"]["ocm-alpha"]["settings"]
+    assert alpha["provider"] == "ocm-alpha"
     assert alpha["baseUrl"] == "https://alpha.example/v1"
     assert alpha["apiKey"] == "key-alpha"
     assert alpha["model"] == "a1"
 
     models = json.loads(
         (providers.parent / "models.json").read_text(encoding="utf-8"))
-    assert set(models["providers"]["alpha"]["models"]) == {"a1", "a2"}
-    assert models["providers"]["alpha"]["models"]["a1"]["supportsVision"] is False
+    assert set(models["providers"]["ocm-alpha"]["models"]) == {"a1", "a2"}
+    assert models["providers"]["ocm-alpha"]["models"]["a1"]["supportsVision"] is False
 
 
 def test_transfer_to_cline_keeps_other_providers(manager, tmp_path):
@@ -107,7 +107,7 @@ def test_transfer_to_cline_keeps_other_providers(manager, tmp_path):
 
     doc = json.loads(providers.read_text(encoding="utf-8"))
     assert doc["providers"]["openrouter"]["settings"]["provider"] == "openrouter"
-    assert "alpha" in doc["providers"]
+    assert "ocm-alpha" in doc["providers"]
 
 
 def test_catalog_points_cline_at_providers_json(manager, tmp_path):
@@ -141,20 +141,23 @@ def test_transfer_to_continue_replaces_its_own_entries(manager, tmp_path):
     path.parent.mkdir(parents=True)
     path.write_text(
         "name: Local\nschema: v1\nmodels:\n"
-        "  - name: Alpha old\n    provider: openai\n    model: old\n"
-        "    apiBase: https://alpha.example/v1\n"
+        "  - name: Alpha old\n    provider: openai\n    model: a1\n"
+        "    apiBase: https://alpha.example/v1\n    apiKey: sk-stale\n"
         "  - name: Manual\n    provider: openai\n    model: keep-me\n"
-        "    apiBase: https://other.example/v1\n",
-        encoding="utf-8")
+        "    apiBase: https://alpha.example/v1\n", encoding="utf-8")
     yaml = pytest.importorskip("yaml")
 
     manager.transfer_profiles([_profile("alpha", ["a1"])], "", ["continue"], home=tmp_path)
 
     doc = yaml.safe_load(path.read_text(encoding="utf-8"))
     names = [m["name"] for m in doc["models"]]
+    # запись, которую писал менеджер (та же тройка провайдер/URL/модель),
+    # обновляется, а пользовательская модель на том же URL остаётся
     assert "Manual" in names
     assert not any("Alpha old" == n for n in names)
     assert "Alpha · a1" in names
+    assert [m["apiKey"] for m in doc["models"] if m.get("model") == "a1"] == ["key-alpha"]
+    assert len([m for m in doc["models"] if m.get("model") == "a1"]) == 1
 
 
 def test_transfer_to_codex_preserves_other_tables(manager, tmp_path):
@@ -181,7 +184,10 @@ def test_transfer_to_codex_preserves_other_tables(manager, tmp_path):
     assert '[model_providers.beta]' in text
     assert text.count("[model_providers.alpha]") == 1
     assert 'wire_api = "chat"' in text
-    assert 'env_key = "OPENCODE_ALPHA_API_KEY"' in text
+    # ключ передаётся bearer-токеном: env_key без переменной окружения
+    # роняет Codex с EnvVarError
+    assert 'experimental_bearer_token = "key-alpha"' in text
+    assert "env_key" not in text
 
 
 def test_transfer_to_claude_sets_env(manager, tmp_path):

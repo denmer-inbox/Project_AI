@@ -63,13 +63,13 @@ def test_mcp_local_entry_keeps_only_filled_env(manager):
     assert "environment" not in plain
 
 
-def test_mcp_remote_entry_hides_token_behind_env(manager):
+def test_mcp_remote_entry_stores_real_token(manager):
     entry = manager.mcp_server_entry(manager.mcp_catalog_entry("github"),
                                      {"GITHUB_PAT": "ghp_secret"})
     assert entry["type"] == "remote"
-    assert entry["headers"]["Authorization"] == "Bearer {env:GITHUB_PAT}"
-    assert "ghp_secret" not in json.dumps(entry)
-    assert list(manager.mcp_entry_secrets(entry)) == ["GITHUB_PAT"]
+    assert entry["headers"]["Authorization"] == "Bearer ghp_secret"
+    assert "ghp_secret" in json.dumps(entry)
+    assert list(manager.mcp_entry_secrets(entry)) == []
     with pytest.raises(ValueError):
         manager.mcp_server_entry(manager.mcp_catalog_entry("github"), {})
 

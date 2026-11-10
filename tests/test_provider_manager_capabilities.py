@@ -212,11 +212,11 @@ def test_openai_compatible_keeps_key_in_settings(manager):
     assert "env" not in proxy
 
 
-def test_non_compatible_package_gets_env_key(manager):
+def test_non_compatible_package_keeps_real_key_in_settings(manager):
     config = manager.apply_profiles({}, [_profile(package="@ai-sdk/openai")])
     proxy = config["providers"]["alpha"]
-    assert proxy["env"] == ["OPENCODE_ALPHA_API_KEY"]
-    assert proxy["settings"]["apiKey"] == "{env:OPENCODE_ALPHA_API_KEY}"
+    assert "env" not in proxy
+    assert proxy["settings"]["apiKey"] == "key-alpha"
 
 
 def test_migrate_provider_keys_fixes_openai_package(manager):
@@ -232,8 +232,8 @@ def test_migrate_provider_keys_fixes_openai_package(manager):
 
     assert fixed == ["alpha"]
     assert proxy["package"] == "@opencode/ai/providers/openai-compatible"
-    assert proxy["env"] == ["OPENCODE_ALPHA_API_KEY"]
-    assert proxy["settings"]["apiKey"] == "{env:OPENCODE_ALPHA_API_KEY}"
+    assert "env" not in proxy
+    assert proxy["settings"]["apiKey"] == "sk-cvc-abc"
 
 
 def test_migrate_provider_keys_leaves_other_keys_alone(manager):
@@ -272,7 +272,7 @@ def test_merge_into_agents_uses_capabilities(manager, tmp_path):
 
     models_path = tmp_path / ".cline" / "data" / "settings" / "models.json"
     doc = json.loads(models_path.read_text(encoding="utf-8"))
-    assert doc["providers"]["alpha"]["models"]["m1"]["supportsVision"] is True
+    assert doc["providers"]["ocm-alpha"]["models"]["m1"]["supportsVision"] is True
 
     yaml = pytest.importorskip("yaml")
     text = (tmp_path / ".continue" / "config.yaml").read_text(encoding="utf-8")
