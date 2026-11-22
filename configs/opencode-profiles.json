@@ -1,0 +1,827 @@
+{
+  "version": 2,
+  "type": "opencode-provider-profiles",
+  "profiles": [
+    {
+      "id": "deepseek-4-flash",
+      "display_name": "DeepSeek V4.1 Flash",
+      "coefficient": "0.1",
+      "base_url": "https://api.aikeysforyou.com/v1",
+      "package": "@ai-sdk/openai",
+      "api_key": "sk-cvc-3cbcb88bfb8894dfef353d1b3c2ab72173c9bca20e13457d7f120c29f27f80da",
+      "models": [
+        "deepseek-v4-flash",
+        "deepseek-v4.1-flash"
+      ],
+      "known_models": [
+        "deepseek-v4-flash",
+        "deepseek-v4.1-flash"
+      ],
+      "extra_settings": {},
+      "raw": {
+        "name": "DeepSeek V4.1 Flash",
+        "package": "@ai-sdk/openai",
+        "settings": {
+          "baseURL": "https://api.aikeysforyou.com/v1",
+          "apiKey": "sk-cvc-3cbcb88bfb8894dfef353d1b3c2ab72173c9bca20e13457d7f120c29f27f80da"
+        },
+        "models": {
+          "deepseek-v4-flash": {
+            "name": "deepseek-v4-flash",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "deepseek-v4.1-flash": {
+            "name": "DeepSeek V4.1 Flash",
+            "limit": {
+              "context": 1048576,
+              "output": 393216
+            },
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text",
+                "image"
+              ],
+              "output": [
+                "text"
+              ],
+              "temperature": true,
+              "reasoning": {
+                "supported": true,
+                "toggle": true,
+                "effort": [
+                  "low",
+                  "medium",
+                  "high",
+                  "max"
+                ]
+              }
+            },
+            "cost": {
+              "input": 0.1,
+              "output": 0.4,
+              "cache": {
+                "read": 0.01,
+                "write": 0.1
+              }
+            }
+          }
+        },
+        "_coefficient": "0.1"
+      }
+    },
+    {
+      "id": "aikeysforyou.com",
+      "display_name": "aikeysforyou.com",
+      "coefficient": "0.1",
+      "base_url": "https://api.aikeysforyou.com/v1",
+      "package": "@ai-sdk/openai-compatible",
+      "api_key": "sk-cvc-32d78cae480bfd71214b71b22cc620943f2b3b2d50ead803e1f4ae8807d16ca0",
+      "models": [
+        "deepseek-v4-flash",
+        "deepseek-v4.1-flash"
+      ],
+      "known_models": [
+        "deepseek-v4-flash",
+        "deepseek-v4.1-flash"
+      ],
+      "extra_settings": {},
+      "raw": {
+        "_coefficient": "0.1",
+        "name": "aikeysforyou.com",
+        "package": "@ai-sdk/openai-compatible",
+        "settings": {
+          "baseURL": "https://api.aikeysforyou.com/v1",
+          "apiKey": "sk-cvc-32d78cae480bfd71214b71b22cc620943f2b3b2d50ead803e1f4ae8807d16ca0"
+        },
+        "models": {
+          "deepseek-v4-flash": {
+            "name": "deepseek-v4-flash",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "deepseek-v4.1-flash": {
+            "name": "deepseek-v4.1-flash",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "deepseek-v4-flash",
+      "display_name": "deepseek-v4-flash_JustLoki",
+      "coefficient": "0.1",
+      "base_url": "https://api.aikeysforyou.com/v1",
+      "package": "@ai-sdk/openai-compatible",
+      "api_key": "sk-cvc-bdacd298d44589e1007c8c04eb469c824e6c5ad255b141df8e09632250ffe834",
+      "models": [
+        "deepseek-v4.1-flash",
+        "qwen3.8-flash",
+        "qwen3.8-max",
+        "claude-fable-5",
+        "claude-fable-5-1",
+        "claude-haiku-4-5",
+        "claude-opus-4-6",
+        "claude-opus-4-7",
+        "claude-opus-4-8",
+        "claude-opus-5",
+        "claude-opus-5-5",
+        "claude-sonnet-4-6",
+        "claude-sonnet-5",
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+        "gemini-3.1-pro",
+        "gemini-3.6-flash",
+        "gemini-3.7-flash",
+        "gemini-3.8-flash",
+        "minimax-m3",
+        "minimax-m3.1-flash",
+        "kimi-k2.7-code",
+        "kimi-k2.8-preview",
+        "kimi-k3",
+        "kimi-k3.1-pro",
+        "gpt-5.6-luna",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-6-astra",
+        "gpt-6-luna",
+        "gpt-6-sol",
+        "gpt-6.1-sol",
+        "gpt-6.1-terra",
+        "hy4-preview",
+        "grok-4.5",
+        "grok-4.6",
+        "grok-4.7",
+        "mimo-v2.6-flash",
+        "mimo-v2.6-pro",
+        "glm-5-turbo",
+        "glm-5.2",
+        "glm-5.3",
+        "glm-5.3-flash"
+      ],
+      "known_models": [
+        "deepseek-v4.1-flash",
+        "qwen3.8-flash",
+        "qwen3.8-max",
+        "claude-fable-5",
+        "claude-fable-5-1",
+        "claude-haiku-4-5",
+        "claude-opus-4-6",
+        "claude-opus-4-7",
+        "claude-opus-4-8",
+        "claude-opus-5",
+        "claude-opus-5-5",
+        "claude-sonnet-4-6",
+        "claude-sonnet-5",
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+        "gemini-3.1-pro",
+        "gemini-3.6-flash",
+        "gemini-3.7-flash",
+        "gemini-3.8-flash",
+        "minimax-m3",
+        "minimax-m3.1-flash",
+        "kimi-k2.7-code",
+        "kimi-k2.8-preview",
+        "kimi-k3",
+        "kimi-k3.1-pro",
+        "gpt-5.6-luna",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-6-astra",
+        "gpt-6-luna",
+        "gpt-6-sol",
+        "gpt-6.1-sol",
+        "gpt-6.1-terra",
+        "hy4-preview",
+        "grok-4.5",
+        "grok-4.6",
+        "grok-4.7",
+        "mimo-v2.6-flash",
+        "mimo-v2.6-pro",
+        "glm-5-turbo",
+        "glm-5.2",
+        "glm-5.3",
+        "glm-5.3-flash"
+      ],
+      "extra_settings": {},
+      "raw": {
+        "_coefficient": "0.1",
+        "name": "deepseek-v4-flash_JustLoki",
+        "package": "@ai-sdk/openai-compatible",
+        "settings": {
+          "baseURL": "https://api.aikeysforyou.com/v1",
+          "apiKey": "sk-cvc-bdacd298d44589e1007c8c04eb469c824e6c5ad255b141df8e09632250ffe834"
+        },
+        "models": {
+          "deepseek-v4.1-flash": {
+            "name": "deepseek-v4.1-flash",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "qwen3.8-flash": {
+            "name": "qwen3.8-flash",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "qwen3.8-max": {
+            "name": "qwen3.8-max",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "claude-fable-5": {
+            "name": "claude-fable-5",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "claude-fable-5-1": {
+            "name": "claude-fable-5-1",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "claude-haiku-4-5": {
+            "name": "claude-haiku-4-5",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "claude-opus-4-6": {
+            "name": "claude-opus-4-6",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "claude-opus-4-7": {
+            "name": "claude-opus-4-7",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "claude-opus-4-8": {
+            "name": "claude-opus-4-8",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "claude-opus-5": {
+            "name": "claude-opus-5",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "claude-opus-5-5": {
+            "name": "claude-opus-5-5",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "claude-sonnet-4-6": {
+            "name": "claude-sonnet-4-6",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "claude-sonnet-5": {
+            "name": "claude-sonnet-5",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "deepseek-v4-flash": {
+            "name": "deepseek-v4-flash",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "deepseek-v4-pro": {
+            "name": "deepseek-v4-pro",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "gemini-3.1-pro": {
+            "name": "gemini-3.1-pro",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "gemini-3.6-flash": {
+            "name": "gemini-3.6-flash",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "gemini-3.7-flash": {
+            "name": "gemini-3.7-flash",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "gemini-3.8-flash": {
+            "name": "gemini-3.8-flash",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "minimax-m3": {
+            "name": "minimax-m3",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "minimax-m3.1-flash": {
+            "name": "minimax-m3.1-flash",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "kimi-k2.7-code": {
+            "name": "kimi-k2.7-code",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "kimi-k2.8-preview": {
+            "name": "kimi-k2.8-preview",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "kimi-k3": {
+            "name": "kimi-k3",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "kimi-k3.1-pro": {
+            "name": "kimi-k3.1-pro",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "gpt-5.6-luna": {
+            "name": "gpt-5.6-luna",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "gpt-5.6-sol": {
+            "name": "gpt-5.6-sol",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "gpt-5.6-terra": {
+            "name": "gpt-5.6-terra",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "gpt-6-astra": {
+            "name": "gpt-6-astra",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "gpt-6-luna": {
+            "name": "gpt-6-luna",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "gpt-6-sol": {
+            "name": "gpt-6-sol",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "gpt-6.1-sol": {
+            "name": "gpt-6.1-sol",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "gpt-6.1-terra": {
+            "name": "gpt-6.1-terra",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "hy4-preview": {
+            "name": "hy4-preview",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "grok-4.5": {
+            "name": "grok-4.5",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "grok-4.6": {
+            "name": "grok-4.6",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "grok-4.7": {
+            "name": "grok-4.7",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "mimo-v2.6-flash": {
+            "name": "mimo-v2.6-flash",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "mimo-v2.6-pro": {
+            "name": "mimo-v2.6-pro",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "glm-5-turbo": {
+            "name": "glm-5-turbo",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "glm-5.2": {
+            "name": "glm-5.2",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "glm-5.3": {
+            "name": "glm-5.3",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "glm-5.3-flash": {
+            "name": "glm-5.3-flash",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "DEEPSEEK_FLASH",
+      "display_name": "DEEPSEEK_FLASH V1.4 (CSHARPONAME)",
+      "coefficient": "0.1",
+      "base_url": "https://api.aikeysforyou.com/v1",
+      "package": "@ai-sdk/openai-compatible",
+      "api_key": "sk-cvc-0fb0aace0d00e6776727deba9a8e1ca2de6b0440f63db5727555bceb1f4bb3bf",
+      "models": [
+        "deepseek-v4-flash-0731",
+        "deepseek-v4-pro-0813",
+        "deepseek-v4.1-flash-1017"
+      ],
+      "known_models": [
+        "deepseek-v4-flash-0731",
+        "deepseek-v4-pro-0813",
+        "deepseek-v4.1-flash-1017"
+      ],
+      "extra_settings": {},
+      "raw": {
+        "_coefficient": "0.1",
+        "name": "DEEPSEEK_FLASH V1.4 (CSHARPONAME)",
+        "package": "@ai-sdk/openai-compatible",
+        "settings": {
+          "baseURL": "https://api.aikeysforyou.com/v1",
+          "apiKey": "sk-cvc-0fb0aace0d00e6776727deba9a8e1ca2de6b0440f63db5727555bceb1f4bb3bf"
+        },
+        "models": {
+          "deepseek-v4-flash-0731": {
+            "name": "deepseek-v4-flash-0731",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "deepseek-v4-pro-0813": {
+            "name": "deepseek-v4-pro-0813",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          },
+          "deepseek-v4.1-flash-1017": {
+            "name": "deepseek-v4.1-flash-1017",
+            "capabilities": {
+              "tools": true,
+              "input": [
+                "text"
+              ],
+              "output": [
+                "text"
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
+  "default_model": "DEEPSEEK_FLASH/deepseek-v4.1-flash-1017"
+}
