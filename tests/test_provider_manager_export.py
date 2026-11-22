@@ -121,3 +121,46 @@ def test_all_profiles_land_in_config(manager):
 
     assert sorted(config["providers"]) == ["alpha", "beta"]
     assert config["model"] == "alpha/a1"
+
+
+def test_tolerant_report_keeps_valid_and_lists_broken(manager):
+    good = _profile(manager, "alpha", ["a1"])
+    bad = {"id": "плохой id", "base_url": "https://x.example", "models": ["m"]}
+    payload = {
+        "type": manager.EXPORT_TYPE,
+        "version": manager.EXPORT_VERSION,
+        "default_model": "alpha/a1",
+        "profiles": [good, bad],
+    }
+
+    report = manager.profiles_from_export_report(payload)
+
+    assert report["total"] == 2
+    assert report["imported"] == 1
+    assert report["skipped"] == 1
+    assert [p["id"] for p in report["profiles"]] == ["alpha"]
+    assert report["default_model"] == "alpha/a1"
+    assert report["problems"][0]["index"] == 2
+    assert report["problems"][0]["id"] == "плохой id"
+    assert report["problems"][0]["error"]
+
+    # строгий разбор на том же файле по-прежнему падает и ничего не отдаёт
+    with pytest.raises(ValueError):
+        manager.profiles_from_export(payload)
+
+
+def test_tolerant_report_all_broken_returns_empty(manager):
+    payload = {"profiles": [{"id": "плохой id"}, {"id": ""}]}
+
+    report = manager.profiles_from_export_report(payload)
+
+    assert report["imported"] == 0
+    assert report["skipped"] == 2
+    assert report["profiles"] == []
+    with pytest.raises(ValueError):
+        manager.profiles_from_export(payload)
+
+
+def test_tolerant_report_structural_error_still_raises(manager):
+    with pytest.raises(ValueError):
+        manager.profiles_from_export_report({"nothing": 1})

@@ -1276,20 +1276,13 @@ def profiles_from_export(data) -> tuple:
     и старый (один профиль), и просто список профилей.
 
     Возвращает (profiles, default_model).
+
+    Строгий вариант: при первой же плохой записи бросает ValueError и не
+    импортирует ничего. Для импорта «что получится» есть
+    profiles_from_export_report() — она импортирует всё валидное и отдаёт
+    список проблем.
     """
-    if isinstance(data, list):
-        entries, default_model = data, ""
-    elif isinstance(data, dict):
-        default_model = str(data.get("default_model") or "").strip()
-        if isinstance(data.get("profiles"), list):
-            entries = data["profiles"]
-        elif data.get("id"):
-            # старый формат: один профиль в корне файла
-            entries = [data]
-        else:
-            raise ValueError("В файле нет профилей (ожидается ключ \"profiles\")")
-    else:
-        raise ValueError("Файл не содержит объект JSON")
+    entries, default_model = _export_entries(data)
     result = []
     for idx, entry in enumerate(entries, 1):
         try:
@@ -1299,6 +1292,57 @@ def profiles_from_export(data) -> tuple:
     if not result:
         raise ValueError("В файле нет ни одного профиля")
     return result, default_model
+
+
+def _export_entries(data) -> tuple:
+    """Возвращает (entries, default_model), не разбирая сами профили."""
+    if isinstance(data, list):
+        return data, ""
+    if isinstance(data, dict):
+        default_model = str(data.get("default_model") or "").strip()
+        if isinstance(data.get("profiles"), list):
+            return data["profiles"], default_model
+        if data.get("id"):
+            # старый формат: один профиль в корне файла
+            return [data], default_model
+        raise ValueError("В файле нет профилей (ожидается ключ \"profiles\")")
+    raise ValueError("Файл не содержит объект JSON")
+
+
+def profiles_from_export_report(data) -> dict:
+    """Терпимый разбор файла экспорта: всё валидное — в результат, плохое — в отчёт.
+
+    Зачем: в строгом profiles_from_export одна испорченная запись отменяет
+    импорт целиком, и пользователь видит «прочитано 0 из N» без объяснения.
+    Здесь импорт не прерывается, а пропущенные записи перечисляются по номерам.
+
+    Возвращает словарь:
+        profiles      — список валидных профилей (может быть пустым)
+        default_model — модель по умолчанию из файла
+        total         — сколько записей было в файле
+        imported      — сколько профилей разобрано
+        skipped       — сколько пропущено
+        problems      — [{"index": n, "id": str, "error": str}, ...]
+    """
+    entries, default_model = _export_entries(data)
+    profiles = []
+    problems = []
+    for idx, entry in enumerate(entries, 1):
+        try:
+            profiles.append(profile_from_export(entry))
+        except ValueError as exc:
+            pid = ""
+            if isinstance(entry, dict):
+                pid = str(entry.get("id") or "").strip()
+            problems.append({"index": idx, "id": pid, "error": str(exc)})
+    return {
+        "profiles": profiles,
+        "default_model": default_model,
+        "total": len(entries),
+        "imported": len(profiles),
+        "skipped": len(problems),
+        "problems": problems,
+    }
 
 
 # ==========================================================================
@@ -7751,10 +7795,32 @@ class App:
                                  parent=self.root)
             return
         try:
-            imported, default_model = profiles_from_export(raw)
+            report = profiles_from_export_report(raw)
         except ValueError as exc:
             messagebox.showerror("Импорт", "%s\n\nФайл: %s" % (exc, src), parent=self.root)
             return
+        imported = report["profiles"]
+        default_model = report["default_model"]
+        if not imported:
+            detail = "\n".join(
+                "№%d%s: %s" % (p["index"], (" (%s)" % p["id"]) if p["id"] else "", p["error"])
+                for p in report["problems"][:10])
+            messagebox.showerror(
+                "Импорт",
+                "Ни один профиль не прочитан (записей в файле: %d).\n\n%s\n\nФайл: %s"
+                % (report["total"], detail, src), parent=self.root)
+            return
+        if report["skipped"]:
+            detail = "\n".join(
+                "№%d%s: %s" % (p["index"], (" (%s)" % p["id"]) if p["id"] else "", p["error"])
+                for p in report["problems"][:10])
+            more = "" if report["skipped"] <= 10 else "\n… ещё %d" % (report["skipped"] - 10)
+            messagebox.showwarning(
+                "Импорт: часть записей пропущена",
+                "Прочитано %d из %d, пропущено %d.\n\n%s%s\n\nОстальные профили будут "
+                "импортированы как обычно (Файл: %s)"
+                % (report["imported"], report["total"], report["skipped"], detail, more, src),
+                parent=self.root)
         existing = [p["id"] for p in imported if self._find(p["id"]) is not None]
         if existing:
             if not messagebox.askyesno(
@@ -7775,12 +7841,15 @@ class App:
             self.var_default_model.set(default_model)
         self.selected = imported[0]["id"]
         self._render_list()
-        self._set_status("ИМПОРТИРОВАНО ПРОФИЛЕЙ: %d (новых %d, заменено %d) — НЕ СОХРАНЁН"
-                         % (len(imported), added, replaced))
+        self._set_status("ИМПОРТИРОВАНО ПРОФИЛЕЙ: %d (новых %d, заменено %d)%s — НЕ СОХРАНЁН"
+                         % (len(imported), added, replaced,
+                            "" if not report["skipped"] else ", пропущено %d" % report["skipped"]))
         messagebox.showinfo(
             "Импорт",
-            "Импортировано профилей: %d\nНовых: %d\nЗаменено: %d\n\n"
-            "Не забудьте «ПРИМЕНИТЬ К КОНФИГУ»." % (len(imported), added, replaced),
+            "Импортировано профилей: %d\nНовых: %d\nЗаменено: %d%s\n\n"
+            "Не забудьте «ПРИМЕНИТЬ К КОНФИГУ»."
+            % (len(imported), added, replaced,
+               "" if not report["skipped"] else "\nПропущено (битые записи): %d" % report["skipped"]),
             parent=self.root)
 
     def open_agents_dialog(self):
