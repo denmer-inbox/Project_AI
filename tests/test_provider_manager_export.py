@@ -164,3 +164,55 @@ def test_tolerant_report_all_broken_returns_empty(manager):
 def test_tolerant_report_structural_error_still_raises(manager):
     with pytest.raises(ValueError):
         manager.profiles_from_export_report({"nothing": 1})
+
+
+# --- перенос не должен менять сам конфиг ----------------------------------
+
+
+def test_export_import_keeps_model_input_types(manager):
+    """Круг экспорт→импорт не расширяет типы входа модели.
+
+    Галочка ВЛОЖЕНИЯ раньше дописывала image+audio+video, поэтому модель,
+    которая видит только картинки, после импорта начинала «видеть» звук и
+    видео — то есть экспорт переносил уже испорченный конфиг.
+    """
+    profile = _profile(manager, "alpha", ["a1"])
+    profile["_raw"] = {
+        "name": "Alpha",
+        "models": {"a1": {"name": "a1", "capabilities": {
+            "tools": True, "input": ["text", "image"], "output": ["text"]}}},
+    }
+    profile["model_capabilities"] = {
+        "a1": manager._capability_flags_from_spec(profile["_raw"]["models"]["a1"]),
+    }
+
+    payload = manager.build_export_payload([profile], "alpha/a1")
+    restored, _ = manager.profiles_from_export(json.loads(json.dumps(payload)))
+    config = manager.apply_profiles({}, restored)
+
+    caps = config["providers"]["alpha"]["models"]["a1"]["capabilities"]
+    assert caps["input"] == ["text", "image"]
+
+
+def test_hidden_models_survive_import_without_raw(manager):
+    """Снятые галочки моделей остаются в конфиге выключенными, даже если
+    в файле экспорта нет блока raw (старые версии)."""
+    payload = {
+        "type": manager.EXPORT_TYPE,
+        "version": manager.EXPORT_VERSION,
+        "profiles": [{
+            "id": "alpha",
+            "base_url": "https://alpha.example/v1",
+            "api_key": "k",
+            "package": manager.PACKAGES[0],
+            "models": ["a1"],
+            "known_models": ["a1", "a2"],
+        }],
+    }
+
+    restored, _ = manager.profiles_from_export(payload)
+    config = manager.apply_profiles({}, restored)
+    models = config["providers"]["alpha"]["models"]
+
+    assert "disabled" not in models["a1"]
+    assert models["a2"]["disabled"] is True

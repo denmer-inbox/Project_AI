@@ -460,6 +460,39 @@ def save_config(path: Path, data: dict):
     return backup
 
 
+def manager_log_dir() -> Path:
+    base = Path(os.environ.get("LOCALAPPDATA") or Path.home())
+    return base / "OpenCodeProviderManager"
+
+
+def log_config_write(config_path, action, added=(), removed=(), kept=(), note=""):
+    """Журнал изменений конфига: что именно добавилось и ушло при записи.
+
+    Нужен, чтобы «профиль вернулся после перезапуска» можно было проверить
+    по факту, а не вспоминать. Пишем построчно, максимум 1 МБ.
+    """
+    try:
+        logdir = manager_log_dir()
+        logdir.mkdir(parents=True, exist_ok=True)
+        path = logdir / "config-writes.log"
+        line = "%s\t%s\t%s\t+%s\t-%s\t=%s\t%s\n" % (
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            action,
+            str(config_path),
+            ",".join(sorted(added)) or "-",
+            ",".join(sorted(removed)) or "-",
+            ",".join(sorted(kept)) or "-",
+            note or "",
+        )
+        if path.exists() and path.stat().st_size > 1024 * 1024:
+            path.write_text("", encoding="utf-8")
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(line)
+        return path
+    except Exception:
+        return None
+
+
 def restore_backup(path: Path, backup: Path):
     data = load_config(backup)
     if not isinstance(data, dict):
@@ -789,9 +822,6 @@ def profiles_from_config(config: dict, coefficients=None) -> list:
             if isinstance(spec, dict) and spec.get("disabled"):
                 continue
             selected.append(mid)
-        for mid in known:
-            if mid not in selected:
-                continue
         placeholder = placeholder_env_name(settings.get("apiKey"))
         api_key = resolve_api_key(settings.get("apiKey"))
         coefficient = str(coefficients.get(pid) or proxy.get("_coefficient") or "")
@@ -928,18 +958,26 @@ def _apply_capabilities(spec: dict, flags) -> dict:
     caps.setdefault("tools", True)
 
     current = caps.get("input") if isinstance(caps.get("input"), list) else []
-    attachment_on = bool(flags.get("attachment"))
+    kinds = (("vision", "image"), ("audio", "audio"), ("video", "video"))
+    explicit = {kind: bool(flags.get(key)) for key, kind in kinds
+                if flags.get(key) is not None}
     inputs = []
-    for key, kind in (("vision", "image"), ("audio", "audio"), ("video", "video")):
-        if flags.get(key) is None:
+    for key, kind in kinds:
+        if kind in explicit:
+            wanted = explicit[kind]
+        else:
             # галочки нет — оставляем как было в конфиге
             wanted = kind in current
-        else:
-            wanted = bool(flags.get(key))
-        if attachment_on:
-            wanted = True
         if wanted:
             inputs.append(kind)
+    # «ВЛОЖЕНИЯ» — не отдельный тип входа, а признак «файл можно приложить».
+    # Раньше эта галочка дописывала сразу image+audio+video, поэтому модель,
+    # которая видит только картинки, после любого «ПРИМЕНИТЬ» (а значит и
+    # после экспорта-импорта) начинала «видеть» аудио и видео. Теперь она
+    # добавляет картинку только когда ни один тип не выбран явно.
+    if (bool(flags.get("attachment")) and explicit
+            and not any(explicit.values()) and "image" not in inputs):
+        inputs.insert(0, "image")
     caps["input"] = ["text"] + inputs
 
     outputs = caps.get("output")
@@ -1122,6 +1160,18 @@ def build_provider(profile: dict) -> dict:
         if mid in models:
             continue
         hidden = copy.deepcopy(spec) if isinstance(spec, dict) else {}
+        hidden["disabled"] = True
+        models[mid] = hidden
+    # Модели, которые в профиле помечены известными (галочка снята), но
+    # которых нет в «сыром» провайдере: так бывает у старых файлов экспорта
+    # без блока raw. Раньше они молча исчезали после импорта.
+    for mid in profile.get("known_models") or []:
+        mid = str(mid or "").strip()
+        if not mid or mid in models:
+            continue
+        hidden = copy.deepcopy(old_models.get(mid)) if isinstance(old_models.get(mid), dict) else {}
+        if flags_by_model.get(mid):
+            hidden = model_spec({"id": mid}, hidden, flags_by_model.get(mid))
         hidden["disabled"] = True
         models[mid] = hidden
     if models:
@@ -6815,6 +6865,7 @@ class App:
         self.config = {}
         self.profiles = []
         self._loaded_provider_ids = set()
+        self._deleted_ids = set()
         self.selected = None
         self._base_signature = ""
         self._history = []
@@ -7079,6 +7130,7 @@ class App:
                                  "Не удалось прочитать:\n%s\n\n%s" % (path, exc))
             self.config, self.profiles = {}, []
         self._loaded_provider_ids = {p["id"] for p in self.profiles}
+        self._deleted_ids = set()
         self.var_default_model.set(default_model_ref(self.config) or "(не задана)")
         self._render_list()
         self._refresh_history()
@@ -7257,13 +7309,33 @@ class App:
             return
         if not messagebox.askyesno(
                 "Удалить профиль",
-                "Удалить профиль «%s»?\n\nИз конфига он исчезнет после "
-                "«ПРИМЕНИТЬ К КОНФИГУ»." % profile["display_name"], parent=self.root):
+                "Удалить профиль «%s»?\n\nОн будет удалён из списка и сразу "
+                "записан в конфиг (снимок прежней версии останется в истории)."
+                % profile["display_name"], parent=self.root):
             return
+        index = self.profiles.index(profile)
         self.profiles.remove(profile)
+        pid = str(profile.get("id") or "")
+        self._deleted_ids.add(pid)
         self.selected = None
         self._render_list()
-        self._set_status("ПРОФИЛЬ %s УДАЛЁН ИЗ СПИСКА" % profile["id"])
+
+        # Раньше удаление жило только в памяти до «ПРИМЕНИТЬ К КОНФИГУ»:
+        # закрыл окно — профиль «вернулся». Теперь пишем сразу, а при ошибке
+        # записи возвращаем профиль на место, чтобы экран не врал.
+        try:
+            ok = self.write_config(silent=True)
+        except Exception:
+            ok = False
+        if not ok:
+            self.profiles.insert(min(index, len(self.profiles)), profile)
+            self._deleted_ids.discard(pid)
+            self.selected = pid or None
+            self._render_list()
+            self._set_status("УДАЛЕНИЕ НЕ СОХРАНЕНО: ПРОФИЛЬ ВОЗВРАЩЁН В СПИСОК")
+            self._refresh_dirty_marker()
+            return
+        self._set_status("ПРОФИЛЬ %s УДАЛЁН ИЗ КОНФИГА" % pid)
         self._refresh_dirty_marker()
 
     # --- модель по умолчанию ---------------------------------------------
@@ -7513,8 +7585,43 @@ class App:
         except Exception:
             pass
 
+    def _dirty_summary(self) -> str:
+        """Коротко: что именно не записано в конфиг."""
+        try:
+            mem = {p["id"] for p in self.profiles}
+            disk = set((self.config.get("providers") or {}))
+            parts = []
+            if mem - disk:
+                parts.append("новые: " + ", ".join(sorted(mem - disk)))
+            if disk - mem:
+                parts.append("удалённые: " + ", ".join(sorted(disk - mem)))
+            return "; ".join(parts) or "правки в профилях"
+        except Exception:
+            return "изменения"
+
     def quit_app(self):
-        """Полный выход: убрать иконку из трея и закрыть приложение."""
+        """Полный выход: убрать иконку из трея и закрыть приложение.
+
+        Перед выходом спрашиваем про несохранённые изменения: раньше выход
+        (в том числе через трей) просто закрывал окно, и всё, что не успели
+        записать кнопкой «ПРИМЕНИТЬ К КОНФИГУ», молча пропадало — при
+        следующем запуске выглядело как «само вернулось».
+        """
+        try:
+            if self._is_dirty():
+                answer = messagebox.askyesnocancel(
+                    "Несохранённые изменения",
+                    "В конфиг не записано: %s\n\nЗаписать сейчас?\n"
+                    "«Да» — записать и выйти, «Нет» — выйти без записи, "
+                    "«Отмена» — остаться в приложении." % self._dirty_summary(),
+                    parent=self.root)
+                if answer is None:
+                    return
+                if answer:
+                    if not self.write_config():
+                        return
+        except Exception:
+            pass
         tray = getattr(self, "tray", None)
         if tray is not None:
             try:
@@ -7678,7 +7785,114 @@ class App:
                             % (entry["name"], safety.name if safety else "—"), parent=self.root)
 
     # --- сохранение -------------------------------------------------------
-    def write_config(self):
+    # --- запись конфига ---------------------------------------------------
+    def _collect_write_plan(self):
+        """Готовит данные для записи. Возвращает (new_config, coefs, info).
+
+        Важное отличие от прежней версии: перед сборкой перечитываем конфиг
+        с диска. Раньше базой служил `self.config`, загруженный при старте,
+        поэтому правки, сделанные другим инструментом (или самим OpenCode),
+        затирались, а «удалённые» провайдеры могли вернуться из устаревшей
+        копии. Здесь база — то, что реально лежит в файле сейчас.
+        """
+        fresh = None
+        try:
+            fresh = load_config(self.config_path)
+        except Exception:
+            fresh = None
+        memory = self.config if isinstance(self.config, dict) else {}
+        base = fresh if isinstance(fresh, dict) and fresh else memory
+
+        mem_providers = set(memory.get("providers") or {})
+        disk_providers = set(base.get("providers") or {})
+        drift_ids = sorted(mem_providers ^ disk_providers)
+        drift = bool(drift_ids) and bool(mem_providers)
+
+        keep_ids = disk_providers - set(self._loaded_provider_ids)
+        coefs = load_coefficients(self.config_path)
+        coefs.update(coefficients_map(base))
+        for profile in self.profiles:
+            pid = str(profile.get("id") or "")
+            if not pid:
+                continue
+            text = str(profile.get("coefficient") or "").strip()
+            if text:
+                coefs[pid] = text
+            else:
+                coefs.pop(pid, None)
+
+        new_config = apply_profiles(base, self.profiles, keep_ids=keep_ids)
+        ref = self.var_default_model.get().strip()
+        if ref and ref != "(не задана)":
+            new_config["model"] = ref
+
+        cleared_default = ""
+        model_ref = (default_model_ref(new_config) or default_model_ref(base)
+                     or default_model_ref(memory))
+        model_pid = parse_model_ref(model_ref)[0]
+        if model_ref and model_pid and model_pid not in (new_config.get("providers") or {}):
+            # модель по умолчанию указывала на удалённый профиль: висячую
+            # ссылку не пишем, иначе OpenCode снова ждёт несуществующего
+            # провайдера и конфиг выглядит «недоделанным»
+            new_config.pop("model", None)
+            cleared_default = model_ref
+
+        final_ids = set(new_config.get("providers") or {})
+        info = {
+            "base_ids": disk_providers,
+            "keep_ids": keep_ids,
+            "added": sorted(final_ids - disk_providers),
+            "removed": sorted(disk_providers - final_ids),
+            "drift": drift,
+            "drift_ids": drift_ids,
+            "cleared_default": cleared_default,
+            "planned": len(final_ids),
+        }
+        return new_config, coefs, info
+
+    def _write_config_impl(self, action="write"):
+        """Записывает конфиг и проверяет результат по файлу. Возвращает info."""
+        new_config, coefs, info = self._collect_write_plan()
+        fixed = migrate_provider_keys(new_config)
+        backup = save_config(self.config_path, new_config)
+        save_coefficients(self.config_path, coefs)
+
+        # проверка после записи: в файле должно быть ровно то, что задумано
+        check = load_config(self.config_path)
+        got = set((check.get("providers") or {}) if isinstance(check, dict) else {})
+        want = set(new_config.get("providers") or {})
+        if want != got:
+            raise RuntimeError(
+                "конфиг записан не полностью: ожидалось %d провайдеров, в файле %d"
+                "\nне записались: %s\nлишние: %s"
+                % (len(want), len(got),
+                   ", ".join(sorted(want - got)) or "—",
+                   ", ".join(sorted(got - want)) or "—"))
+
+        self.config = new_config
+        self.profiles = profiles_from_config(self.config, coefs)
+        self._loaded_provider_ids = {p["id"] for p in self.profiles}
+        for pid in list(getattr(self, "_deleted_ids", ()) or ()):
+            if pid not in self._loaded_provider_ids:
+                self._deleted_ids.discard(pid)
+        self._base_signature = self._signature()
+
+        info.update({
+            "backup": backup,
+            "fixed": fixed,
+            "count": len(self.profiles),
+            "models": {p["id"]: len(p["models"]) for p in self.profiles},
+            "log": log_config_write(
+                self.config_path, action,
+                added=info["added"], removed=info["removed"],
+                kept=info["keep_ids"],
+                note="drift=" + (",".join(info["drift_ids"]) if info["drift"] else "-")
+                     + ("; cleared_default=" + info["cleared_default"]
+                        if info["cleared_default"] else "")),
+        })
+        return info
+
+    def write_config(self, silent=False):
         was_dirty = self._is_dirty()
         missing = [p["id"] for p in self.profiles
                    if p.get("key_placeholder") and not p.get("api_key")]
@@ -7689,60 +7903,95 @@ class App:
                 "не увидит — запросы будут отклонены.\n\n"
                 "Сохранить конфиг без этих ключей?" % ", ".join(missing),
                 parent=self.root):
-            return
+            return False
         try:
-            keep_ids = set(self.config.get("providers") or {}) - set(self._loaded_provider_ids)
-            # коэффициенты выносим в отдельный файл до записи конфига: схема
-            # OpenCode не разрешает `_coefficient` внутри providers.<id>
-            coefs = load_coefficients(self.config_path)
-            coefs.update(coefficients_map(self.config))
-            for profile in self.profiles:
-                pid = str(profile.get("id") or "")
-                if not pid:
-                    continue
-                text = str(profile.get("coefficient") or "").strip()
-                if text:
-                    coefs[pid] = text
-                else:
-                    coefs.pop(pid, None)
-            new_config = apply_profiles(self.config, self.profiles, keep_ids=keep_ids)
-            ref = self.var_default_model.get().strip()
-            if ref and ref != "(не задана)":
-                new_config["model"] = ref
-            fixed = migrate_provider_keys(new_config)
-            backup = save_config(self.config_path, new_config)
-            save_coefficients(self.config_path, coefs)
+            info = self._write_config_impl("delete" if silent else "write")
         except Exception as exc:
             messagebox.showerror("Запись конфига", str(exc), parent=self.root)
-            return
-        self.config = new_config
-        self.profiles = profiles_from_config(self.config, coefs)
-        self._loaded_provider_ids = {p["id"] for p in self.profiles}
-        self._base_signature = self._signature()
+            return False
+
         self._render_list()
         self._refresh_history()
         self._refresh_dirty_marker()
-        msg = "Конфиг записан. Предыдущая версия: %s" % (backup.name if backup else "—")
+        backup_name = info["backup"].name if info["backup"] else "—"
+        msg = "Конфиг записан (%d профилей). Предыдущая версия: %s" % (info["count"], backup_name)
         self._set_status(msg.upper())
+        if silent:
+            return True
+
         extra = ""
-        if fixed:
-            extra = ("\n\nИсправлены провайдеры со ссылкой {env:...} или пакетом "
-                     "@ai-sdk/openai: %s\n"
-                     "Ключ снова хранится в самом конфиге." % ", ".join(fixed))
+        if info["fixed"]:
+            extra += ("\n\nИсправлены провайдеры со ссылкой {env:...} или пакетом "
+                      "@ai-sdk/openai: %s\nКлюч снова хранится в самом конфиге."
+                      % ", ".join(info["fixed"]))
+        if info["cleared_default"]:
+            extra += ("\n\nМодель по умолчанию %s указывала на удалённый профиль — "
+                      "ссылка убрана, выберите модель заново." % info["cleared_default"])
+        if info["removed"]:
+            extra += "\n\nУдалено из конфига: %s" % ", ".join(info["removed"])
+        if info["drift"]:
+            extra += ("\n\nФайл менялся мимо менеджера (%s). Записано поверх свежей "
+                      "версии: чужие провайдеры сохранены." % ", ".join(info["drift_ids"]))
         messagebox.showinfo(
             "Готово",
             "%s\n\nФайл: %s\n\nОткат: кнопка «ИСТОРИЯ И ОТКАТ…» или Ctrl+Z%s" % (
                 msg, self.config_path, extra), parent=self.root)
         if not was_dirty:
-            self._set_status("СОХРАНЕНА КОНТРОЛЬНАЯ ТОЧКА: " + (backup.name if backup else "—"))
+            self._set_status("СОХРАНЕНА КОНТРОЛЬНАЯ ТОЧКА: " + backup_name)
+        return True
 
     # --- экспорт / импорт -------------------------------------------------
+    def _export_candidates(self):
+        """Кого писать в файл экспорта.
+
+        Берём объединение: профили из окна (это намерение пользователя) и
+        профили из конфига на диске. Раньше экспорт строился только по списку
+        окна, и всё, что не попало в список (например, провайдер добавлен
+        другим инструментом или список не успел перечитаться), молча терялось.
+
+        Возвращает (profiles, notes) — notes это готовые предупреждения.
+        """
+        notes = []
+        by_id = {}
+        order = []
+        disk_ids = set()
+        try:
+            fresh_cfg = load_config(self.config_path)
+            fresh = profiles_from_config(fresh_cfg, load_coefficients(self.config_path))
+        except Exception as exc:
+            fresh = []
+            notes.append("конфиг на диске не прочитан (%s), экспорт только по окну" % exc)
+        for p in fresh:
+            disk_ids.add(p["id"])
+            if p["id"] not in by_id:
+                order.append(p["id"])
+            by_id[p["id"]] = p
+        window_ids = {p["id"] for p in self.profiles}
+        for p in self.profiles:
+            if p["id"] not in by_id:
+                order.append(p["id"])
+            by_id[p["id"]] = p       # правки в окне важнее версии с диска
+        deleted = set(getattr(self, "_deleted_ids", ()) or ())
+        extra = [pid for pid in disk_ids if pid not in window_ids and pid not in deleted]
+        if extra:
+            notes.append("в конфиге есть, а в списке окна нет (включены в экспорт): "
+                         + ", ".join(sorted(extra)))
+        kept = [by_id[pid] for pid in order if pid in by_id and pid not in deleted]
+        empty_keys = [p["id"] for p in kept if not p.get("api_key")]
+        if empty_keys:
+            notes.append("без ключа, перенесутся пустыми: " + ", ".join(empty_keys))
+        if disk_ids and len(kept) != len(disk_ids):
+            notes.append("в конфиге %d, к экспорту %d" % (len(disk_ids), len(kept)))
+        return kept, notes
+
     def export_profile(self):
-        if not self.profiles:
-            messagebox.showinfo("Экспорт профилей", "Список профилей пуст — нечего сохранять",
+        exported, notes = self._export_candidates()
+        if not exported:
+            messagebox.showinfo("Экспорт профилей",
+                                "Некого экспортировать: в конфиге и в списке нет профилей",
                                 parent=self.root)
             return
-        data = build_export_payload(self.profiles, self.var_default_model.get())
+        data = build_export_payload(exported, self.var_default_model.get())
         default_dir = str(Path.home() / "Downloads")
         name = filedialog.asksaveasfilename(
             parent=self.root, title="Экспорт всех профилей моделей", defaultextension=".json",
@@ -7770,11 +8019,30 @@ class App:
         if not path.exists():
             messagebox.showerror("Экспорт", "Файл не создан: %s" % path, parent=self.root)
             return
-        self._set_status("ЭКСПОРТИРОВАНО ПРОФИЛЕЙ: %d → %s" % (len(data["profiles"]), path))
+        # проверка «что записали, то и прочитается»: считать по файлу,
+        # а не по памяти, иначе потеря одного профиля останется незамеченной
+        file_ids = []
+        verify_warn = ""
+        try:
+            written = json.loads(path.read_text(encoding="utf-8-sig"))
+            file_ids = [str(p.get("id")) for p in (written.get("profiles") or [])]
+        except Exception as exc:
+            verify_warn = "\n\nВНИМАНИЕ: файл не читается обратно (%s)" % exc
+        self._set_status("ЭКСПОРТИРОВАНО ПРОФИЛЕЙ: %d → %s" % (len(file_ids), path))
+        summary = [
+            "Готово к экспорту: %d" % len(exported),
+            "Прочитано из файла обратно: %d" % len(file_ids),
+        ]
+        if len(file_ids) != len(exported):
+            summary.append("РАСХОЖДЕНИЕ: записано %d, прочитано %d"
+                           % (len(exported), len(file_ids)))
+        detail = "\n".join(summary)
+        if notes:
+            detail += "\n\n" + "\n".join("• " + n for n in notes)
         messagebox.showinfo(
             "Экспорт",
-            "Сохранено профилей: %d\n\nФайл:\n%s\n\nРазмер: %d байт" % (
-                len(data["profiles"]), path, path.stat().st_size), parent=self.root)
+            "%s\n\nФайл:\n%s\n\nРазмер: %d байт%s" % (
+                detail, path, path.stat().st_size, verify_warn), parent=self.root)
 
     def import_profile(self):
         default_dir = str(Path.home() / "Downloads")

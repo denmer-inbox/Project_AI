@@ -67,13 +67,33 @@ def test_capabilities_flags_are_written_to_config(manager):
 
 
 def test_attachment_does_not_add_unknown_model_key(manager):
-    """ВЛОЖЕНИЯ не пишут несуществующий ключ и добавляют типы входа."""
+    """ВЛОЖЕНИЯ не пишут несуществующий ключ и разрешают картинку."""
     flags = {"vision": False, "audio": False, "video": False, "attachment": True}
     config = manager.apply_profiles({}, [_profile(caps={"m1": flags})])
     spec = config["providers"]["alpha"]["models"]["m1"]
 
     assert "attachment" not in spec
-    assert spec["capabilities"]["input"] == ["text", "image", "audio", "video"]
+    # «файл можно приложить» не значит «видит звук и видео»: раньше галочка
+    # дописывала все три типа, и модель с картинками после применения
+    # начинала видеть аудио/видео (портился конфиг и экспорт)
+    assert spec["capabilities"]["input"] == ["text", "image"]
+
+
+def test_attachment_does_not_widen_vision_model(manager):
+    """Модель с картинками не получает audio/video при применении."""
+    raw = {"name": "Alpha", "models": {"m1": {
+        "name": "m1",
+        "capabilities": {"tools": True, "input": ["text", "image"],
+                         "output": ["text"]},
+    }}}
+    profile = _profile(caps={})
+    profile["_raw"] = raw
+    # профиль прочитан из конфига: галочки выводятся из самих capabilities
+    loaded = manager.profiles_from_config({"providers": {"alpha": raw}})[0]
+    config = manager.apply_profiles({}, [loaded])
+    caps = config["providers"]["alpha"]["models"]["m1"]["capabilities"]
+
+    assert caps["input"] == ["text", "image"]
 
 
 def test_attachment_off_removes_legacy_key(manager):
